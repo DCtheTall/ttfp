@@ -911,10 +911,77 @@ def RunExercises():
   a = Expression(Apply(Z, u))
   print('(Z u):', a)
   a = OneStepBetaReduce(a)
-  print('(Z u) ->', a)
+  print('  ->', a)
   a = OneStepBetaReduce(a)
   print('  ->', a)
   print('  =α (u (Z u)):', a == Expression(Apply(u, Apply(Z, u))))
+
+  
+  print('\nExercise 1.20a')
+  F = Expression(Abstract(u, Abstract(x, Abstract(y, Apply(Apply(x, u), y)))))
+  print('F:', F)
+  Y = Expression(
+      Abstract(
+          u,
+          Apply(
+              Abstract(z, Apply(u, Apply(z, z))),
+              Abstract(z, Apply(u, Apply(z, z)))
+          )
+      )
+  )
+  print('Y:', Y)
+  M = Expression(Apply(Y, F))
+  print('M = (Y F):', M)
+  H = OneStepBetaReduce(M)
+  print('  -> H:', H)
+  FH = OneStepBetaReduce(H)
+  print('  ->', FH)
+  print('  =α (F H):', FH == Expression(Apply(F, H)))
+  N = Expression(Apply(F, M))
+  print('(F M) = (F (Y F)):', N)
+  N = Expression(Apply(F, OneStepBetaReduce(M)))
+  print('  ->', N)
+  print('  =α (F H):', N == FH)
+  N = Expression(Apply(F, M))
+  print('(F M):', N)
+  N = OneStepBetaReduce(N)
+  print('  ->', N)
+  print(
+      '  =α λxy.(x M y):',
+      N == Expression(Abstract(x, Abstract(y, Apply(Apply(x, M), y))))
+  )
+
+  print('Exercise 1.20b')
+  F = Expression(Abstract(u, Abstract(x, Abstract(y, Abstract(z, Apply(Apply(Apply(x, y), z), u))))))
+  print('F:', F)
+  print('Y:', Y)
+  M = Expression(Apply(Y, F))
+  print('M = (Y F):', M)
+  H = OneStepBetaReduce(M)
+  print('  -> H:', H)
+  FH = OneStepBetaReduce(H)
+  print('  ->', FH)
+  print('  =α (F H):', FH == Expression(Apply(F, H)))
+  N = Expression(Apply(F, M))
+  print('(F M) = (F (Y F)):', N)
+  N = Expression(Apply(F, OneStepBetaReduce(M)))
+  print('  ->', N)
+  print('  =α (F H):', N == FH)
+  N = Expression(Apply(Apply(Apply(Apply(F, M), x), y), z))
+  print('(F M x y z):', N)
+  N = OneStepBetaReduce(N)
+  print('  ->', N)
+  N = OneStepBetaReduce(N)
+  print('  ->', N)
+  N = OneStepBetaReduce(N)
+  print('  ->', N)
+  N = OneStepBetaReduce(N)
+  print('  ->', N)
+
+  print(
+      '  =α (x y z M):',
+      N == Expression(Apply(Apply(Apply(x, y), z), M))
+  )
 
 
 if __name__ == '__main__':
