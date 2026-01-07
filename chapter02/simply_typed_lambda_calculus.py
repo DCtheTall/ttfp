@@ -25,7 +25,6 @@ class Arrow(Type):
   
   def __str__(self):
     # Right associative, Apply is left associative.
-    # TODO Expression support
     ret = self.ret
     ret_str = str(ret)
     if isinstance(ret, Arrow):

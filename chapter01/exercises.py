@@ -5,7 +5,19 @@ Chapter 1 Exercises
 """
 
 
-from untyped_lambda_calculus import *
+from untyped_lambda_calculus import (
+    Abstract,
+    Apply,
+    BetaReduce,
+    Expression,
+    FreeVars,
+    OneStepBetaReduce,
+    Redexes,
+    SimulSubstitute,
+    Substitute,
+    Subterms,
+    Var,
+)
 
 
 def RunExercises():
