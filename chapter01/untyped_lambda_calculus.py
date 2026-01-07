@@ -292,6 +292,7 @@ def Rename(M: Expression, x: Var, y: Var) -> Expression:
     if u == x:
       v = BindingVar(y)
       N = _RenameBoundVars(N, u, v)
+      N.MaybeBindFreeVarsTo(v)
     else:
       v = u
     return Expression(Abstract(v, Rename(N, x, y)))
@@ -351,7 +352,7 @@ def Substitute(
         )
     )
   if isinstance(M.term, Abstract):
-    if FreeVars(N).Contains(M.term.arg):
+    if FreeVars(N).Contains(M.term.arg.var):
       if not zs:
         raise Exception('Need more variables for substitution')
       z = zs.pop()
@@ -413,23 +414,23 @@ def BetaNormal(M: Expression) -> bool:
   return len(Redexes(M)) == 0
 
 
-def OneStepBetaReduce(M: Expression):
+def OneStepBetaReduce(M: Expression, zs: list[Var] = []):
   if isinstance(M.term, Occurrence):
     return M
   if isinstance(M.term, Apply):
     if isinstance(M.term.FuncTerm(), Abstract):
       M, N = M.term.fn, M.term.arg
-      return Substitute(M.term.body, M.term.arg.var, N, [], M.term.arg)
+      return Substitute(M.term.body, M.term.arg.var, N, zs, M.term.arg)
     if BetaNormal(M.term.fn):
-      return Expression(Apply(M.term.fn, OneStepBetaReduce(M.term.arg)))
-    return Expression(Apply(OneStepBetaReduce(M.term.fn), M.term.arg))
+      return Expression(Apply(M.term.fn, OneStepBetaReduce(M.term.arg, zs)))
+    return Expression(Apply(OneStepBetaReduce(M.term.fn, zs), M.term.arg))
   if isinstance(M.term, Abstract):
-    return Expression(Abstract(M.term.arg, OneStepBetaReduce(M.term.body)))
+    return Expression(Abstract(M.term.arg, OneStepBetaReduce(M.term.body, zs)))
   raise NotImplementedError(f'Unexpected input to OneStepBetaReduce {M}')
   
 
 def BetaReduce(M: Expression):
-  # Keep beta reducing until terms are alpha-equiv.
+  # Keep beta-reducing. Will infinite loop for non-halting terms.
   while not BetaNormal(M):
     M = OneStepBetaReduce(M)
   return M
@@ -971,13 +972,12 @@ def RunExercises():
   print('(F M x y z):', N)
   N = OneStepBetaReduce(N)
   print('  ->', N)
-  N = OneStepBetaReduce(N)
+  N = OneStepBetaReduce(N, [p])
   print('  ->', N)
-  N = OneStepBetaReduce(N)
+  N = OneStepBetaReduce(N, [q])
   print('  ->', N)
-  N = OneStepBetaReduce(N)
+  N = OneStepBetaReduce(N, [r, v, w])
   print('  ->', N)
-
   print(
       '  =α (x y z M):',
       N == Expression(Apply(Apply(Apply(x, y), z), M))
