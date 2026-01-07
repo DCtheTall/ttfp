@@ -410,18 +410,39 @@ class Redexes(Multiset):
       raise NotImplementedError(f'Unexpected input to Redexes {M}')
 
 
-def OneStepBetaReduce(M: Expression, zs: list[Var] = []):
+def OneStepBetaReduce(M: Expression, zs: list[Var] = [], applicative=False):
   if isinstance(M.term, Occurrence):
     return M
   if isinstance(M.term, Apply):
+    # Applicative order: evaluate leftmost-innermost redex first.
+    if applicative:
+      if not M.term.fn.BetaNormal():
+        return Expression(
+            Apply(OneStepBetaReduce(M.term.fn, zs, applicative), M.term.arg)
+        )
+      if not M.term.arg.BetaNormal():
+        return Expression(
+            Apply(M.term.fn, OneStepBetaReduce(M.term.arg, zs, applicative))
+        )
+      if isinstance(M.term.FuncTerm(), Abstract):
+        M, N = M.term.fn, M.term.arg
+        return Substitute(M.term.body, M.term.arg.var, N, zs, M.term.arg)
+      return M
+    # Normal order: evaluate leftmost-outermost redex first.
     if isinstance(M.term.FuncTerm(), Abstract):
       M, N = M.term.fn, M.term.arg
       return Substitute(M.term.body, M.term.arg.var, N, zs, M.term.arg)
     if M.term.fn.BetaNormal():
-      return Expression(Apply(M.term.fn, OneStepBetaReduce(M.term.arg, zs)))
-    return Expression(Apply(OneStepBetaReduce(M.term.fn, zs), M.term.arg))
+      return Expression(
+          Apply(M.term.fn, OneStepBetaReduce(M.term.arg, zs, applicative))
+      )
+    return Expression(
+        Apply(OneStepBetaReduce(M.term.fn, zs, applicative), M.term.arg)
+    )
   if isinstance(M.term, Abstract):
-    return Expression(Abstract(M.term.arg, OneStepBetaReduce(M.term.body, zs)))
+    return Expression(
+        Abstract(M.term.arg, OneStepBetaReduce(M.term.body, zs, applicative))
+    )
   raise NotImplementedError(f'Unexpected input to OneStepBetaReduce {M}')
   
 

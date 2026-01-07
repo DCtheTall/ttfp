@@ -152,11 +152,16 @@ def RunExamples():
   print(f'{M} ->', OneStepBetaReduce(M))
 
   M = Expression(Apply(Abstract(x, Apply(Abstract(y, Apply(y, x)), z)), v))
+  print('Normal order')
   N = OneStepBetaReduce(M)
   print(f'{M} ->', N, '->', OneStepBetaReduce(N))
+  print('Applicative order')
+  N = OneStepBetaReduce(M, applicative=True)
+  print(f'{M} ->', N, '->', OneStepBetaReduce(N, applicative=True))
 
   xx = Abstract(x, Apply(x, x))
   M = Expression(Apply(xx, xx))
+  print('Self application')
   print(f'{M} ->', OneStepBetaReduce(M))
 
 
