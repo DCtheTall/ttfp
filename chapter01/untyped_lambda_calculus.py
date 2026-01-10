@@ -414,7 +414,7 @@ def OneStepBetaReduce(M: Expression, zs: list[Var] = [], applicative=False):
   if isinstance(M.term, Occurrence):
     return M
   if isinstance(M.term, Apply):
-    # Applicative order: evaluate leftmost-innermost redex first.
+    # Applicative order: evaluate innermost-leftmost redex first.
     if applicative:
       if not M.term.fn.BetaNormal():
         return Expression(
@@ -428,7 +428,7 @@ def OneStepBetaReduce(M: Expression, zs: list[Var] = [], applicative=False):
         M, N = M.term.fn, M.term.arg
         return Substitute(M.term.body, M.term.arg.var, N, zs, M.term.arg)
       return M
-    # Normal order: evaluate leftmost-outermost redex first.
+    # Normal order: evaluate outermost-leftmost redex first.
     if isinstance(M.term.FuncTerm(), Abstract):
       M, N = M.term.fn, M.term.arg
       return Substitute(M.term.body, M.term.arg.var, N, zs, M.term.arg)

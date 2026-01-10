@@ -103,7 +103,6 @@ def RunExamples():
   print(f'{a} =α {a}:', a == a)
   print(f'{a} =α {b}:', a == b)
   print(f'{a} =α {c}:', a == c)
-  print('RHS after renames:', c)
   print(f'{a} =α {d}:', a == d)
   print(f'{a} =α {e}:', a == e)
   print(f'{a} =α {f}:', a == f)
