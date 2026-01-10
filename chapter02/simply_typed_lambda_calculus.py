@@ -5,9 +5,12 @@ Chapter 1: Simply Lambda Calculus
 """
 
 
+from typing import Sequence, Union
+
+
 class Type:
   def __str__(self):
-    raise NotImplementedError('Not implemented')
+    raise NotImplementedError('Do not cast Term subclass to str')
 
 
 class TypeVar(Type):
@@ -31,6 +34,12 @@ class Arrow(Type):
       ret_str = ret_str[1:-1]
     return f'({self.arg} -> {ret_str})'
 
+  def __eq__(self, other):
+    assert isinstance(other, Type)
+    if not isinstance(other, Arrow):
+      return False
+    return (self.arg, self.ret) == (other.arg, other.ret)
+
 
 class Term:
   typ: Type
@@ -47,6 +56,63 @@ class Var(Term):
   def __str__(self):
     return f'{self.name}:{self.typ}'
 
+  def __hash__(self):
+    return hash(str(self))
+
+
+class Occurrence:
+  def __init__(self, u: Var):
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = u.typ
+
+  def __str__(self):
+    return str(self.var)
+
+  def __eq__(self, other):
+    if isinstance(other, Occurrence):
+      return self.var == other.var
+    if isinstance(other, Var):
+      return self.var == other
+    raise Exception(f'Unexpected RHS {other}')
+
+
+class FreeVar(Occurrence):
+  pass
+
+
+class BindingVar(Occurrence):
+  def __eq__(self, other):
+    return id(self) == id(other)
+
+  def __init__(self, u: Var):
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = u.typ
+
+  def ShouldBind(self, fv: FreeVar) -> bool:
+    return self.var == fv
+
+
+class BoundVar(Occurrence):
+  def __init__(self, bv: BindingVar, fv: FreeVar):
+    assert isinstance(bv, BindingVar)
+    self.bv = bv
+    self.var = fv.var
+    if self.bv.typ != self.var.typ:
+      raise TypeError(
+          f'Cannot bind variable with type {self.bv.typ} '
+          f'to variable with type {self.fv.typ}'
+      ) 
+    self.typ = fv.typ
+
+  def __str__(self):
+    # Bound variables omit types.
+    return str(self.var).split(':')[0]
+
+  def BoundTo(self, bv: BindingVar) -> bool:
+    return self.bv == bv
+
 
 class Apply(Term):
   def __init__(self, fn: Term, arg: Term):
@@ -60,8 +126,8 @@ class Apply(Term):
 
   def __str__(self):
     fn = self.fn
-    # if isinstance(fn, Expression):
-    #   fn = fn.term
+    if isinstance(fn, Expression):
+      fn = fn.term
     fn_str = str(fn)
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
@@ -69,23 +135,431 @@ class Apply(Term):
 
   def FuncTerm(self) -> Term:
     fn = self.fn
-    # if isinstance(fn, Expression):
-    #   fn = fn.term
+    if isinstance(fn, Expression):
+      fn = fn.term
     return fn
 
 
-alpha = TypeVar('α')
-beta = TypeVar('β')
-gamma = TypeVar('γ')
-sigma = TypeVar('σ')
-tau = TypeVar('τ')
-print(alpha, beta, Arrow(alpha, beta), Arrow(Arrow(alpha, beta), Arrow(gamma, tau)))
-a = Var('a', Arrow(beta, alpha))
-b = Var('b', beta)
-# b = Var('b', Arrow(gamma, Arrow(alpha, beta)))
-# c = Var('c', gamma)
-print(a, b, Apply(a, b))
-a = Var('a', Arrow(beta, Arrow(gamma, alpha)))
-b = Var('b', beta)
-c = Var('c', gamma)
-print(a, b, c, Apply(Apply(a, b), c))
+class Abstract(Term):
+  def __init__(self, arg: Union[Var, BindingVar], body: Term):
+    self.arg = arg
+    self.body = body
+    self.typ = Arrow(self.arg.typ, self.body.typ)
+
+  def __str__(self):
+    body = self.BodyTerm()
+    args = str(self.arg)
+    if isinstance(body, Abstract):
+      while isinstance(body, Abstract):
+        args += f'.λ{(body.arg)}'
+        body = body.BodyTerm()
+    return f'(λ{args}.{body}):{self.typ}'
+
+  def BodyTerm(self) -> Term:
+    if isinstance(self.body, Expression):
+      return self.body.term
+    return self.body
+
+
+class Expression(Term):
+  term: Term
+  typ: Type
+
+  def __init__(self, u: Term):
+    if isinstance(u, Expression):
+      self.term = u.Copy().term
+    elif isinstance(u, Var):
+      self.term = FreeVar(u)
+    elif isinstance(u, FreeVar):
+      self.term = u
+    elif isinstance(u, BoundVar):
+      self.term = u
+    elif isinstance(u, Apply):
+      self.term = Apply(Expression(u.fn), Expression(u.arg))
+    elif isinstance(u, Abstract):
+      v = u.arg
+      if not isinstance(v, BindingVar):
+        v = BindingVar(v)
+      M = Expression(u.body)
+      M.MaybeBindFreeVarsTo(v)
+      self.term = Abstract(v, M)
+    else:
+      raise NotImplementedError(f'Unexpected input to Expression {type(u)}')
+    self.typ = self.term.typ
+
+  def __str__(self):
+    return str(self.term)
+
+  def MaybeBindFreeVarsTo(self, v: BindingVar):
+    if isinstance(self.term, Var):
+      raise Exception('Should not store Var in Expression')
+    elif isinstance(self.term, BindingVar):
+      raise Exception('Should not store BindingVar in Expression')
+    elif isinstance(self.term, FreeVar):
+      if v.ShouldBind(self.term):
+        self.term = BoundVar(v, self.term)
+    elif isinstance(self.term, BoundVar):
+      pass
+    elif isinstance(self.term, Apply):
+      self.term.fn.MaybeBindFreeVarsTo(v)
+      self.term.arg.MaybeBindFreeVarsTo(v)
+    elif isinstance(self.term, Abstract):
+      self.term.body.MaybeBindFreeVarsTo(v)
+    else:
+      raise NotImplementedError(f'Unexpected member of Expression {self.term}')
+  
+  def Copy(self):
+    if isinstance(self.term, FreeVar) or isinstance(self.term, BoundVar):
+      return Expression(self.term.var)
+    if isinstance(self.term, Apply):
+      return Expression(Apply(self.term.fn.Copy(), self.term.arg.Copy()))
+    if isinstance(self.term, Abstract):
+      bv = self.term.arg
+      return Expression(Abstract(bv.var, self.term.body.Copy()))
+    raise NotImplementedError(f'Unexpected member of Expression {self.term}')
+
+
+class Multiset:
+  terms: list[Term]
+
+  def Contains(self, x: Term) -> bool:
+    return x in self.terms
+
+  def __str__(self):
+    if len(self) == 0:
+      return 'Ø'
+    terms = ', '.join([str(x) for x in self])
+    return f'[{terms}]'
+
+  def __iter__(self):
+    for term in self.terms:
+      yield term
+
+  def __len__(self):
+    return len(self.terms)
+
+
+class FreeVars(Multiset):
+  def __init__(self, e: Expression):
+    if isinstance(e.term, Var):
+      raise Exception('Should not store Var in Expression')
+    elif isinstance(e.term, BindingVar):
+      raise Exception('Should not store BindingVar in Expression')
+    elif isinstance(e.term, FreeVar):
+      self.terms = [e.term.var]
+    elif isinstance(e.term, BoundVar):
+      self.terms = []
+    elif isinstance(e.term, Apply):
+      self.terms = FreeVars(e.term.fn).terms + FreeVars(e.term.arg).terms
+    elif isinstance(e.term, Abstract):
+      self.terms = FreeVars(e.term.body).terms
+    else:
+      raise NotImplementedError(f'Unexpected member of Expression {e.term}')
+
+
+class Statement:
+  def __init__(self, subject: Expression, typ: Type):
+    if subject.typ != typ:
+      raise TypeError(
+          f'Cannot create Statement with expression with type {subject.typ} '
+          f'and type {typ}'
+      )
+    self.subj = subject
+    self.typ = typ
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Declaration:
+  def __init__(self, subject: Var):
+    if not isinstance(subject, Var):
+      raise ValueError(f'Cannot create declaration with {subject}')
+    self.subj = BindingVar(subject)
+
+  def Var(self):
+    return self.subj.var
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Domain(Multiset):
+    def __init__(self, vars: list[Var]):
+      self.terms = vars
+
+
+class Context:
+  def __init__(self, *vars: Sequence[Var]):
+    self.declarations = [Declaration(u) for u in vars]
+    uniq_vars = set(d.Var().name for d in self.declarations)
+    if len(self.declarations) != len(uniq_vars):
+      raise ValueError('All declarations must be diferent')
+
+  def __str__(self):
+    if not self.declarations:
+      return 'Ø'
+    return ', '.join([str(d) for d in self.declarations])
+
+  # Overload for subcontext, A < B returns if A is a subcontext of B
+  def __lt__(self, other):
+    for u in self.declarations:
+      for v in other.declarations:
+        if u.subj.var == v.subj.var:
+          break
+      else:
+        return False
+    return True
+
+  # Overload for permutation, A == B returns if A is a permutation of B
+  def __eq__(self, other):
+    return (self < other) and (other < self)
+
+  # Overload for projection, A | B
+  def __or__(self, other: Sequence[Var]):
+    return Context(*(set(self.Dom()) & set(other)))
+
+  def BindStatementFreeVars(self, sttmt: Statement):
+    for decl in self.declarations:
+      sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+  
+  def ContainsVar(self, u: Var):
+    return self.Dom().Contains(u)
+
+  def PullVar(self, u: Var):
+    return Context(*[v for v in self.Dom() if v != u])
+
+  def PushVar(self, u: Var):
+    return Context(u, *self.Dom())
+
+  def PushVars(self, *us: list[Var]):
+    return Context(*us, *self.Dom())
+
+  def Dom(self) -> Domain:
+    return Domain([decl.subj.var for decl in self.declarations])
+
+
+class Judgement:
+  def __init__(self, ctx: Context, sttmnt: Statement):
+    self.ctx = ctx
+    self.sttmnt = sttmnt
+    self.ctx.BindStatementFreeVars(sttmnt)
+
+  def __str__(self):
+    return f'{self.ctx} |- {self.sttmnt}'
+
+
+class DerivationRule:
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if premisses:
+      ctx = premisses[0].ctx
+      for pmiss in premisses:
+        if ctx != pmiss.ctx:
+          raise ValueError(
+              'Cannot use different Contexts in premisses of '
+              'the same DerivationRule'
+          )
+    self.premisses = premisses
+  
+  def Conclusion(self) -> Judgement:
+    raise NotImplementedError(
+        'Do not call Conclusion with Derivation subclass'
+    )
+
+  def __str__(self):
+    premiss_str = ', '.join([str(p) for p in self.premisses])
+    horiz_rule = '-' * len(premiss_str)
+    if premiss_str:
+      return f'{premiss_str}\n{horiz_rule}\n{self.Conclusion()}'
+    return str(self.Conclusion())
+
+
+class VarRule(DerivationRule):
+  def __init__(self, ctx: Context, u: Var):
+    if not ctx.ContainsVar(u):
+      raise ValueError(f'Cannot create VarRule for {u} with Context {ctx}')
+    super().__init__()
+    self.ctx = ctx
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(Expression(self.u), self.u.typ))
+
+
+class ApplRule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create ApplRule with 2 Judgements')
+    super().__init__(*premisses)
+
+  def Conclusion(self) -> Judgement:
+    p_fn, p_arg = self.premisses
+    fn = p_fn.sttmnt.subj
+    arg = p_arg.sttmnt.subj
+    expr = Expression(Apply(fn, arg))
+    return Judgement(p_fn.ctx, Statement(expr, expr.typ))
+
+
+class AbstRule(DerivationRule):
+  def __init__(self, u: Var, premiss: Judgement):
+    super().__init__(premiss)
+    p = self.premisses[0]
+    if not p.ctx.ContainsVar(u):
+      raise ValueError(f'Cannot call Abst rule with var {u} and Context {p.ctx}')
+    self.u = u
+  
+  def Conclusion(self) -> Judgement:
+    p = self.premisses[0]
+    u = self.u
+    body = p.sttmnt.subj
+    expr = Expression(Abstract(u, body))
+    return Judgement(p.ctx.PullVar(u), Statement(expr, expr.typ))
+
+
+class Derivation:
+  def __init__(self, ctx: Context):
+    self.ctx = ctx
+    self.rules: list[DerivationRule] = []
+    self.conclusions: list[Judgement] = []
+
+  def _AddRule(self, rule: DerivationRule) -> Judgement:
+    self.rules.append(rule)
+    concl = rule.Conclusion()
+    self.conclusions.append(concl)
+    return concl
+
+  def VarRule(self, u: Var) -> Judgement:
+    return self._AddRule(VarRule(self.ctx, u))
+
+  def ApplRule(self, fn: Judgement, arg: Judgement) -> Judgement:
+    assert fn in self.conclusions
+    assert arg in self.conclusions
+    concl = self._AddRule(ApplRule(fn, arg))
+    return concl
+
+  def AbstRule(self, arg: Var, body: Judgement) -> Judgement:
+    assert body in self.conclusions
+    concl = self._AddRule(AbstRule(arg, body))
+    self.ctx = concl.ctx
+    return concl
+
+  def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
+    if isinstance(rule, VarRule):
+      return '(var)'
+    if isinstance(rule, ApplRule):
+      fn_key = keys[rule.premisses[0]]
+      arg_key = keys[rule.premisses[1]]
+      return f'(appl) on ({fn_key}) and ({arg_key})'
+    if isinstance(rule, AbstRule):
+      body_key = keys[rule.premisses[0]]
+      return f'(abst) on ({body_key})'
+    raise ValueError(f'Unexpected input to Justification {rule}')
+
+  def LinearFormat(self) -> str:
+    result = []
+    keys: dict[Judgement, str] = {}
+    for rule, concl in zip(self.rules, self.conclusions):
+      key = str(len(keys) + 1)
+      keys[concl] = key
+      justif = self._Justification(rule, keys)
+      line = f'({key}) {concl}    {justif}'
+      result.append(line)
+      result.append('-' * len(line))
+    return '\n'.join(result)
+
+  def FlagFormat(self) -> str:
+    result = []
+    indent_count = 0
+    var_keys: dict[Var, str] = {}
+    keys: dict[Judgement, str] = {}
+    for decl in self.conclusions[0].ctx.declarations:
+      key = chr(ord('a') + len(var_keys))
+      var_keys[decl.subj.var] = key
+      indent = '| ' * indent_count
+      seperator = (
+          ' ' * len(f'({key}) ')
+          + '| ' * indent_count
+          + '|'
+          + '-' * (len(str(decl)) + 3)
+      )
+      line = f'({key}) {indent}| {decl} |'
+      result.extend([seperator, line, seperator])
+      indent_count += 1
+    for rule, concl in zip(self.rules, self.conclusions):
+      indent = '| ' * indent_count
+      if isinstance(rule, VarRule):
+        key = str(len(keys) + 1)
+        keys[concl] = key
+        var_key = var_keys[concl.sttmnt.subj.term.var]
+        justif = f'(var) on ({var_key})'
+      else:
+        if isinstance(rule, AbstRule):
+          indent_count -= 1
+          indent = '| ' * indent_count
+        key = str(len(keys) + 1)
+        keys[concl] = key
+        justif = self._Justification(rule, keys)
+      line = f'({key}) {indent}{concl.sttmnt}    {justif}'
+      result.append(line)
+      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+    return '\n'.join(result)
+
+
+def DeriveTerm(jdgmnt: Judgement) -> Derivation:
+  term_vars: list[Var] = []
+  def _FindVars(M: Expression):
+    if isinstance(M.term, FreeVar):
+      assert jdgmnt.ctx.ContainsVar(M.term.var)
+    elif isinstance(M.term, BoundVar):
+      pass
+    elif isinstance(M.term, Abstract):
+      term_vars.append(M.term.arg.var)
+      _FindVars(M.term.body)
+    elif isinstance(M.term, Apply):
+      _FindVars(M.term.fn)
+      _FindVars(M.term.arg)
+    else:
+      raise ValueError(f'Unexpected term {M.term}')
+  _FindVars(Expression(jdgmnt.sttmnt.subj))
+  ctx = jdgmnt.ctx.PushVars(*term_vars)
+  d = Derivation(ctx)
+  def _Helper(M: Expression) -> DerivationRule:
+    if isinstance(M.term, FreeVar):
+      return d.VarRule(M.term.var)
+    if isinstance(M.term, BoundVar):
+      raise ValueError(f'Should not need rule for bound variable {M.term}')
+    if isinstance(M.term, Apply):
+      return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
+    if isinstance(M.term, Abstract):
+      return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
+  _Helper(Expression(jdgmnt.sttmnt.subj))
+  return d
+
+
+def FindTerm(
+    ctx: Context, typ: Type, new_vars: list[Var]
+) -> tuple[Expression, Derivation]:
+  def _Helper(ctx: Context, typ: Type, new_vars: list[Var]):
+    for decl in ctx.declarations:
+      if decl.subj.typ == typ:
+        return decl.subj.var
+    if isinstance(typ, Arrow):
+      for u in new_vars:
+        if u.typ == typ.arg:
+          body = _Helper(ctx.PushVar(u), typ.ret, [v for v in new_vars if v != u])
+          return Expression(Abstract(u, body))
+      else:
+        raise ValueError(f'Need variable with type {typ.arg} to add to Context')
+    arg_goal = None
+    u = None
+    for decl in ctx.declarations:
+      if isinstance(decl.subj.typ, Arrow):
+        if decl.subj.typ.ret == typ:
+          arg_goal = decl.subj.typ.arg
+          u = decl.subj.var
+    if arg_goal is None:
+      raise ValueError(f'No variable has or returns {typ}')
+    v = _Helper(ctx, arg_goal, new_vars)
+    return Expression(Apply(u, v))
+  term = _Helper(ctx, typ, new_vars)
+  return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))
