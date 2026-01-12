@@ -5,7 +5,24 @@ Chapter 2 Examples
 """
 
 
-from simply_typed_lambda_calculus import *
+from simply_typed_lambda_calculus import (
+    Abstract,
+    Apply,
+    Arrow,
+    BetaReduce,
+    Context,
+    Derivation,
+    DeriveTerm,
+    Expression,
+    FindTerm,
+    Judgement,
+    OneStepBetaReduce,
+    Redexes,
+    Statement,
+    Substitute,
+    TypeVar,
+    Var,
+)
 import untyped
 
 
