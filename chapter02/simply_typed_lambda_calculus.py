@@ -500,14 +500,14 @@ class Derivation:
       if isinstance(rule, AbstRule):
         abst_order.append(rule.arg)
     abst_order = list(reversed(abst_order))
-    def _Key(decl: Declaration, abst_order: list[Var]):
+    def _SortKey(decl: Declaration, abst_order: list[Var]):
       try:
         return abst_order.index(decl.subj.var)
       except ValueError:
         return -1
     declarations = sorted(
         self.conclusions[0].ctx.declarations,
-        key=lambda d: _Key(d, abst_order)
+        key=lambda d: _SortKey(d, abst_order)
     )
     for decl in declarations:
       key = chr(ord('a') + len(var_keys))
@@ -579,26 +579,30 @@ def FindTerm(
   def _Helper(ctx: Context, typ: Type, new_vars: list[Var]):
     for decl in ctx.declarations:
       if decl.subj.typ == typ:
-        return decl.subj.var
+        return ctx, Expression(decl.subj.var)
     if isinstance(typ, Arrow):
       for u in new_vars:
+        if u.typ == typ:
+          new_vars.remove(u)
+          return ctx.PushVar(u), Expression(u)
         if u.typ == typ.arg:
-          body = _Helper(ctx.PushVar(u), typ.ret, [v for v in new_vars if v != u])
-          return Expression(Abstract(u, body))
+          new_vars.remove(u)
+          ctx, body = _Helper(ctx.PushVar(u), typ.ret, new_vars)
+          return ctx, Expression(Abstract(u, body))
       else:
         raise ValueError(f'Need variable with type {typ.arg} to add to Context')
-    arg_goal = None
-    u = None
     for decl in ctx.declarations:
       if isinstance(decl.subj.typ, Arrow):
         if decl.subj.typ.ret == typ:
           arg_goal = decl.subj.typ.arg
-          u = decl.subj.var
-    if arg_goal is None:
+          try:
+              ctx, v = _Helper(ctx, arg_goal, new_vars)
+              return ctx, Expression(Apply(decl.subj.var, v))
+          except ValueError:
+              continue
+    else:
       raise ValueError(f'No variable has or returns {typ}')
-    v = _Helper(ctx, arg_goal, new_vars)
-    return Expression(Apply(u, v))
-  term = _Helper(ctx, typ, new_vars)
+  _, term = _Helper(ctx, typ, new_vars)
   return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))
 
 

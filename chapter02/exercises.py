@@ -15,9 +15,9 @@ def RunExercises():
   alpha = TypeVar('α')
   beta = TypeVar('β')
   gamma = TypeVar('γ')
-  rho = TypeVar('ρ')
-  sigma = TypeVar('σ')
-  tau = TypeVar('τ')
+  A = TypeVar('A')
+  B = TypeVar('B')
+  C = TypeVar('C')
 
   print('Exercise 2.1a')
   x_ut = ut.Var('x')
@@ -153,7 +153,7 @@ def RunExercises():
   print('z:', M_typemap[str(z_ut)])
   print(f'{M}:', M_types[0][1])
 
-  print('Exericse 2.5b')
+  print('Exercise 2.5b')
   M = ut.Expression(
       ut.Abstract(
           x_ut,
@@ -169,7 +169,7 @@ def RunExercises():
     print(e)
   
 
-  print('\nExericse 2.6')
+  print('\nExercise 2.6')
   x = Var('x', Arrow(Arrow(alpha, beta), alpha))
   z = Var('z', alpha)
   y = Var('y', beta)
@@ -179,6 +179,34 @@ def RunExercises():
   print('----------')
   deriv = DeriveTerm(jdgmnt)
   print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.7a')
+  f = Var('f', Arrow(A, B))
+  g = Var('g', Arrow(B, C))
+  x = Var('x', A)
+  fog = Expression(Abstract(x, Apply(g, Apply(f, x))))
+  jdgmnt = Judgement(Context(f, g), Statement(fog, Arrow(A, C)))
+  print(jdgmnt)
+  print('----------')
+  deriv = DeriveTerm(jdgmnt)
+  print(deriv.LinearFormat())
+
+  print('Exercise 2.7b')
+  x = Var('x', Arrow(A, B))
+  y = Var('y', Arrow(B, C))
+  a = Var('a', A)
+  goal_t = Arrow(Arrow(A, B), Arrow(Arrow(B, C), Arrow(A, C)))
+  term, deriv = FindTerm(Context(), goal_t, [x, y, a])
+  print(deriv.LinearFormat())
+
+  print('Exercise 2.7c')
+  z = Var('z', alpha)
+  x = Var('x', Arrow(alpha, beta))
+  y = Var('y', Arrow(beta, gamma))
+  M = Expression(Abstract(z, Apply(y, Apply(x, z))))
+  deriv = DeriveTerm(Judgement(Context(x, y), Statement(M, Arrow(alpha, gamma))))
+  print(deriv.LinearFormat())
 
 
 if __name__ == '__main__':
