@@ -7,10 +7,15 @@ Chapter 1: Simply Lambda Calculus
 
 from typing import Optional, Sequence, Union
 
+import untyped
+
 
 class Type:
   def __str__(self):
     raise NotImplementedError('Do not cast Term subclass to str')
+
+  def __hash__(self):
+    return id(self)
 
 
 class TypeVar(Type):
@@ -25,6 +30,9 @@ class Arrow(Type):
   def __init__(self, arg: TypeVar, ret: TypeVar):
     self.arg = arg
     self.ret = ret
+
+  def __hash__(self):
+    return id(self)
   
   def __str__(self):
     # Right associative, Apply is left associative.
@@ -355,13 +363,13 @@ class Context:
 
 
 class Judgement:
-  def __init__(self, ctx: Context, sttmnt: Statement):
+  def __init__(self, ctx: Context, stmt: Statement):
     self.ctx = ctx
-    self.sttmnt = sttmnt
-    self.ctx.BindStatementFreeVars(sttmnt)
+    self.stmt = stmt
+    self.ctx.BindStatementFreeVars(stmt)
 
   def __str__(self):
-    return f'{self.ctx} |- {self.sttmnt}'
+    return f'{self.ctx} |- {self.stmt}'
 
 
 class DerivationRule:
@@ -409,8 +417,8 @@ class ApplRule(DerivationRule):
 
   def Conclusion(self) -> Judgement:
     p_fn, p_arg = self.premisses
-    fn = p_fn.sttmnt.subj
-    arg = p_arg.sttmnt.subj
+    fn = p_fn.stmt.subj
+    arg = p_arg.stmt.subj
     expr = Expression(Apply(fn, arg))
     return Judgement(p_fn.ctx, Statement(expr, expr.typ))
 
@@ -426,7 +434,7 @@ class AbstRule(DerivationRule):
   def Conclusion(self) -> Judgement:
     p = self.premisses[0]
     u = self.u
-    body = p.sttmnt.subj
+    body = p.stmt.subj
     expr = Expression(Abstract(u, body))
     return Judgement(p.ctx.PullVar(u), Statement(expr, expr.typ))
 
@@ -505,7 +513,7 @@ class Derivation:
       if isinstance(rule, VarRule):
         key = str(len(keys) + 1)
         keys[concl] = key
-        var_key = var_keys[concl.sttmnt.subj.term.var]
+        var_key = var_keys[concl.stmt.subj.term.var]
         justif = f'(var) on ({var_key})'
       else:
         if isinstance(rule, AbstRule):
@@ -514,7 +522,7 @@ class Derivation:
         key = str(len(keys) + 1)
         keys[concl] = key
         justif = self._Justification(rule, keys)
-      line = f'({key}) {indent}{concl.sttmnt}    {justif}'
+      line = f'({key}) {indent}{concl.stmt}    {justif}'
       result.append(line)
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
@@ -535,7 +543,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       _FindVars(M.term.arg)
     else:
       raise ValueError(f'Unexpected term {M.term}')
-  _FindVars(Expression(jdgmnt.sttmnt.subj))
+  _FindVars(Expression(jdgmnt.stmt.subj))
   ctx = jdgmnt.ctx.PushVars(*term_vars)
   d = Derivation(ctx)
   def _Helper(M: Expression) -> DerivationRule:
@@ -547,7 +555,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
     if isinstance(M.term, Abstract):
       return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
-  _Helper(Expression(jdgmnt.sttmnt.subj))
+  _Helper(Expression(jdgmnt.stmt.subj))
   return d
 
 
@@ -580,52 +588,124 @@ def FindTerm(
   return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))
 
 
+class TypePlaceholder(Type):
+  typ: Optional[Type]
 
-def _HasBindingVar(M: Expression, y: Var) -> bool:
-  if isinstance(M.term, Var):
-    raise Exception('Should not store Var in Expression')
-  if isinstance(M.term, BindingVar):
-    raise Exception('Should not store BindingVar in Expression')
-  if (
-      isinstance(M.term, BoundVar)
-      or isinstance(M.term, FreeVar)
-  ):
-    return False
-  if isinstance(M.term, Apply):
-    return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
-  if isinstance(M.term, Abstract):
-    bv = M.term.arg
-    if bv.var == y:
-      return True
-    return _HasBindingVar(M.term.body, y)
-  raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
+  def __init__(self):
+    self.typ = None
+
+  def Occurs(self, typ: Type):
+    if isinstance(typ, Arrow):
+      return self.Occurs(typ.arg) or self.Occurs(typ.ret)
+    assert isinstance(typ, TypePlaceholder)
+    return self == typ
 
 
-def _RenameBoundVars(
-    M: Expression, x: BindingVar, y: BindingVar
-) -> Expression:
-  assert isinstance(x, BindingVar) and isinstance(y, BindingVar)
-  if isinstance(M.term, FreeVar):
-    return M
-  if isinstance(M.term, BoundVar):
-    if M.term.bv == x:
-      return BoundVar(y, FreeVar(y.var))
-    return M
-  if isinstance(M.term, Apply):
-    return Expression(
-        Apply(
-            _RenameBoundVars(M.term.fn, x, y),
-            _RenameBoundVars(M.term.arg, x, y)
-        )
-    )
-  if isinstance(M.term, Abstract):
-    return Expression(
-        Abstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
-    )
-  raise NotImplementedError(f'Unexpected input to RenameBoundVars {M}')
+def InferTypes(
+    M: untyped.Expression, free_types: list[Type]
+) -> list[tuple[untyped.Expression, Type]]:
+  def _Unify(t1: Type, t2: Type):
+    if t1 == t2:
+      return
+    if isinstance(t1, TypePlaceholder):
+      if t1.Occurs(t2):
+        raise TypeError('Term is not typeable due to cycle')
+      t1.typ = t2
+      return
+    if isinstance(t2, TypePlaceholder):
+      if t2.Occurs(t1):
+        raise TypeError('Term is not typeable due to cycle')
+      t2.typ = t1
+      return
+    if isinstance(t1, Arrow) and isinstance(t2, Arrow):
+      _Unify(t1.arg, t2.arg)
+      _Unify(t1.ret, t2.ret)
+      return
+    raise TypeError('Type mismatch unifying types')
+
+  def _Infer(M: untyped.Expression, env: dict[untyped.Var, TypePlaceholder]):
+    if isinstance(M.term, untyped.FreeVar):
+      return [(M, TypePlaceholder())]
+    if isinstance(M.term, untyped.BoundVar):
+      assert M.term.var in env
+      return [(M, env[M.term.var])]
+    if isinstance(M.term, untyped.Apply):
+      fn_types = _Infer(M.term.fn, env)
+      arg_types = _Infer(M.term.arg, env)
+      ret_p = TypePlaceholder()
+      _Unify(fn_types[0][1], Arrow(arg_types[0][1], ret_p))
+      return [(M, ret_p)] + fn_types + arg_types
+    if isinstance(M.term, untyped.Abstract):
+      arg_p = TypePlaceholder()
+      new_env = env.copy()
+      new_env[M.term.arg.var] = arg_p
+      body_types = _Infer(M.term.body, new_env)
+      return [(M, Arrow(arg_p, body_types[0][1]))] + body_types
+    raise Exception(f'Unexpected input to InferType {M}')
+  types = _Infer(M, {})
+  
+  def _Assign(typ: Type, typemap: dict[TypePlaceholder, TypeVar]):
+    if isinstance(typ, Arrow):
+      typemap[typ] = Arrow(_Assign(typ.arg, typemap), _Assign(typ.ret, typemap))
+      return typemap[typ]
+    if isinstance(typ.typ, Arrow):
+      typemap[typ] = _Assign(typ.typ, typemap)
+      return typemap[typ]
+    if typ in typemap:
+      return typemap[typ]
+    if not free_types:
+      raise TypeError('Need more free types')
+    typemap[typ] = free_types.pop()
+    return typemap[typ]
+  typemap = {}
+  for _, typ in types:
+    _Assign(typ, typemap)
+  return [(N, typemap[typ_p]) for N, typ_p in types]
 
 
 def Rename(M: Expression, x: Var, y: Var) -> Expression:
+  def _HasBindingVar(M: Expression, y: Var) -> bool:
+    if isinstance(M.term, Var):
+      raise Exception('Should not store Var in Expression')
+    if isinstance(M.term, BindingVar):
+      raise Exception('Should not store BindingVar in Expression')
+    if (
+        isinstance(M.term, BoundVar)
+        or isinstance(M.term, FreeVar)
+    ):
+      return False
+    if isinstance(M.term, Apply):
+      return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
+    if isinstance(M.term, Abstract):
+      bv = M.term.arg
+      if bv.var == y:
+        return True
+      return _HasBindingVar(M.term.body, y)
+    raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
+
+  def _RenameBoundVars(
+      M: Expression, x: BindingVar, y: BindingVar
+  ) -> Expression:
+    assert isinstance(x, BindingVar) and isinstance(y, BindingVar)
+    if isinstance(M.term, FreeVar):
+      return M
+    if isinstance(M.term, BoundVar):
+      if M.term.bv == x:
+        return BoundVar(y, FreeVar(y.var))
+      return M
+    if isinstance(M.term, Apply):
+      return Expression(
+          Apply(
+              _RenameBoundVars(M.term.fn, x, y),
+              _RenameBoundVars(M.term.arg, x, y)
+          )
+      )
+    if isinstance(M.term, Abstract):
+      return Expression(
+          Abstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
+      )
+    raise NotImplementedError(f'Unexpected input to RenameBoundVars {M}')
+
   if isinstance(M.term, FreeVar):
     if M.term.var == x:
       return Expression(y)
@@ -769,7 +849,7 @@ def OneStepBetaReduce(M: Expression, zs: list[Var] = [], applicative=False):
 
 
 def BetaReduce(M: Expression):
-  # Keep beta-reducing. Will infinite loop for non-halting terms.
+  # In λ-> all terms are guaranteed to normalize.
   while not M.BetaNormal():
     M = OneStepBetaReduce(M)
   return M

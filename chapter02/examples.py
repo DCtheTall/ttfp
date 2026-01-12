@@ -6,6 +6,7 @@ Chapter 2 Examples
 
 
 from simply_typed_lambda_calculus import *
+import untyped
 
 
 def RunExamples():
