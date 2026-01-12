@@ -7,7 +7,7 @@ Chapter 1: Simply Lambda Calculus
 
 from typing import Optional, Sequence, Union
 
-import untyped
+import untyped as ut
 
 
 class Type:
@@ -377,10 +377,10 @@ class DerivationRule:
     if premisses:
       ctx = premisses[0].ctx
       for pmiss in premisses:
-        if ctx != pmiss.ctx:
+        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
           raise ValueError(
               'Cannot use different Contexts in premisses of '
-              'the same DerivationRule'
+              f'the same DerivationRule: {ctx} != {pmiss.ctx}'
           )
     self.premisses = premisses
   
@@ -424,19 +424,19 @@ class ApplRule(DerivationRule):
 
 
 class AbstRule(DerivationRule):
-  def __init__(self, u: Var, premiss: Judgement):
+  def __init__(self, arg: Var, premiss: Judgement):
     super().__init__(premiss)
     p = self.premisses[0]
-    if not p.ctx.ContainsVar(u):
-      raise ValueError(f'Cannot call Abst rule with var {u} and Context {p.ctx}')
-    self.u = u
+    if not p.ctx.ContainsVar(arg):
+      raise ValueError(f'Cannot call Abst rule with var {arg} and Context {p.ctx}')
+    self.arg = arg
   
   def Conclusion(self) -> Judgement:
     p = self.premisses[0]
-    u = self.u
+    a = self.arg
     body = p.stmt.subj
-    expr = Expression(Abstract(u, body))
-    return Judgement(p.ctx.PullVar(u), Statement(expr, expr.typ))
+    expr = Expression(Abstract(a, body))
+    return Judgement(p.ctx.PullVar(a), Statement(expr, expr.typ))
 
 
 class Derivation:
@@ -495,7 +495,21 @@ class Derivation:
     indent_count = 0
     var_keys: dict[Var, str] = {}
     keys: dict[Judgement, str] = {}
-    for decl in self.conclusions[0].ctx.declarations:
+    abst_order: list[Var] = []
+    for rule in self.rules:
+      if isinstance(rule, AbstRule):
+        abst_order.append(rule.arg)
+    abst_order = list(reversed(abst_order))
+    def _Key(decl: Declaration, abst_order: list[Var]):
+      try:
+        return abst_order.index(decl.subj.var)
+      except ValueError:
+        return -1
+    declarations = sorted(
+        self.conclusions[0].ctx.declarations,
+        key=lambda d: _Key(d, abst_order)
+    )
+    for decl in declarations:
       key = chr(ord('a') + len(var_keys))
       var_keys[decl.subj.var] = key
       indent = '| ' * indent_count
@@ -611,8 +625,8 @@ class TypePlaceholder(Type):
 
 
 def InferTypes(
-    M: untyped.Expression, free_types: list[Type]
-) -> list[tuple[untyped.Expression, Type]]:
+    M: ut.Expression, free_types: list[Type]
+) -> list[tuple[ut.Expression, Type]]:
   def _Prune(typ: Type):
     if isinstance(typ, TypePlaceholder):
       return typ.Prune()
@@ -639,28 +653,32 @@ def InferTypes(
       return
     raise TypeError('Type mismatch unifying types')
 
-  def _Infer(M: untyped.Expression, env: dict[untyped.Var, TypePlaceholder]):
-    if isinstance(M.term, untyped.FreeVar):
+  def _Infer(M: ut.Expression, env: dict[ut.Var, TypePlaceholder]):
+    if isinstance(M.term, ut.FreeVar):
       if M.term.var in env:
         return [(M, env[M.term.var])]
       typ_p = TypePlaceholder()
       env[M.term.var] = typ_p
       return [(M, typ_p)]
-    if isinstance(M.term, untyped.BoundVar):
+    if isinstance(M.term, ut.BoundVar):
       assert M.term.var in env
       return [(M, env[M.term.var])]
-    if isinstance(M.term, untyped.Apply):
+    if isinstance(M.term, ut.Apply):
       fn_types = _Infer(M.term.fn, env)
       arg_types = _Infer(M.term.arg, env)
       ret_p = TypePlaceholder()
       _Unify(fn_types[0][1], Arrow(arg_types[0][1], ret_p))
       return [(M, ret_p)] + fn_types + arg_types
-    if isinstance(M.term, untyped.Abstract):
+    if isinstance(M.term, ut.Abstract):
       arg_p = TypePlaceholder()
       new_env = env.copy()
       new_env[M.term.arg.var] = arg_p
       body_types = _Infer(M.term.body, new_env)
-      return [(M, Arrow(arg_p, body_types[0][1]))] + body_types
+      return (
+          [(M, Arrow(arg_p, body_types[0][1]))]
+          + [(M.term.arg, arg_p)]
+          + body_types
+      )
     raise Exception(f'Unexpected input to InferType {M}')
   types = _Infer(M, {})
   
@@ -679,6 +697,10 @@ def InferTypes(
   for _, typ in types:
     _Assign(typ, typemap)
   return [(N, typemap[_Prune(typ_p)]) for N, typ_p in types]
+
+
+def InferType(M: ut.Expression, free_types: list[TypeVar]):
+  return InferTypes(M, free_types)[0][1]
 
 
 def Rename(M: Expression, x: Var, y: Var) -> Expression:
