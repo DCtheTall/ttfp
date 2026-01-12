@@ -139,7 +139,10 @@ class Apply(Term):
     fn_str = str(fn)
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
-    return f'({fn_str} {self.arg}):{self.typ}'
+    arg = str(self.arg)
+    if ':' in arg and not isinstance(self.arg.term, FreeVar):
+      arg = ':'.join(arg.split(':')[:-1])
+    return f'({fn_str} {arg}):{self.typ}'
 
   def FuncTerm(self) -> Term:
     fn = self.fn
@@ -161,7 +164,10 @@ class Abstract(Term):
       while isinstance(body, Abstract):
         args += f'.λ{(body.arg)}'
         body = body.BodyTerm()
-    return f'(λ{args}.{body}):{self.typ}'
+    body_str = str(body)
+    if ':' in body_str and not isinstance(body, FreeVar):
+      body_str = ':'.join(body_str.split(':')[:-1])
+    return f'(λ{args}.{body_str}):{self.typ}'
 
   def BodyTerm(self) -> Term:
     if isinstance(self.body, Expression):

@@ -15,6 +15,7 @@ def RunExercises():
   alpha = TypeVar('α')
   beta = TypeVar('β')
   gamma = TypeVar('γ')
+  delta = TypeVar('δ')
   A = TypeVar('A')
   B = TypeVar('B')
   C = TypeVar('C')
@@ -117,13 +118,7 @@ def RunExercises():
           x_ut, ut.Abstract(
               y_ut,
               ut.Abstract(
-                  z_ut,
-                  ut.Apply(
-                      ut.Apply(
-                          y_ut, ut.Apply(x_ut, z_ut)
-                      ),
-                      x_ut,
-                  )
+                  z_ut, ut.Apply(ut.Apply(y_ut, ut.Apply(x_ut, z_ut)), x_ut)
               )
           )
       )
@@ -207,6 +202,120 @@ def RunExercises():
   M = Expression(Abstract(z, Apply(y, Apply(x, z))))
   deriv = DeriveTerm(Judgement(Context(x, y), Statement(M, Arrow(alpha, gamma))))
   print(deriv.LinearFormat())
+
+
+  print('\nExercise 2.8a')
+  x = Var('x', Arrow(gamma, beta))
+  y = Var('y', Arrow(Arrow(gamma, beta), beta))
+  z = Var('z', gamma)
+  print(x, y, z)
+  M = Expression(Abstract(x, Abstract(y, Apply(y, Abstract(z, Apply(y, x))))))
+  print(M)
+
+  print('Exercise 2.8d')
+  deriv = DeriveTerm(Judgement(Context(), Statement(M, M.typ)))
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.9a')
+  x = Var('x', Arrow(delta, Arrow(delta, alpha)))
+  y = Var('y', Arrow(gamma, alpha))
+  z = Var('z', Arrow(alpha, beta))
+  u = Var('u', delta)
+  v = Var('v', gamma)
+  jdgmnt = Judgement(
+      Context(x, y, z),
+      Statement(
+          Expression(Abstract(u, Abstract(v, Apply(z, Apply(y, v))))),
+          Arrow(delta, Arrow(gamma, beta))
+      )
+  )
+  deriv = DeriveTerm(jdgmnt)
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.9b')
+  jdgmnt = Judgement(
+      Context(x, y, z),
+      Statement(
+          Expression(Abstract(u, Abstract(v, Apply(z, Apply(Apply(x, u), u))))),
+          Arrow(delta, Arrow(gamma, beta))
+      )
+  )
+  deriv = DeriveTerm(jdgmnt)
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.10a')
+  M = ut.Expression(ut.Apply(ut.Apply(x_ut, z_ut), ut.Apply(y_ut, z_ut)))
+  M_t = InferType(M, [gamma, beta, alpha])
+  M_types = InferTypes(M, [gamma, beta, alpha])
+  M_typemap = {str(k): str(v) for k, v in M_types}
+  print('x:', M_typemap[str(x_ut)])
+  print('y:', M_typemap[str(y_ut)])
+  print('z:', M_typemap[str(z_ut)])
+  print(f'{M}:', M_types[0][1])
+  x = Var('x', Arrow(gamma, Arrow(beta, alpha)))
+  y = Var('y', Arrow(gamma, beta))
+  z = Var('z', gamma)
+  M = Expression(Apply(Apply(x, z), Apply(y, z)))
+  jdgmnt = Judgement(Context(x, y, z), Statement(M, alpha))
+  deriv = DeriveTerm(jdgmnt)
+  print('------')
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.10b')
+  x = Var('x', Arrow(Arrow(alpha, beta), beta))
+  y = Var('y', Arrow(gamma, Arrow(alpha, beta)))
+  z = Var('z', gamma)
+  print('x:', x.typ)
+  print('y:', y.typ)
+  print('z:', z.typ)
+  M = Expression(Abstract(x, Apply(x, Apply(y, z))))
+  print(M)
+  jdgmnt = Judgement(Context(y, z), Statement(M, M.typ))
+  deriv = DeriveTerm(jdgmnt)
+  print('------')
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.10c')
+  x = Var('x', Arrow(alpha, Arrow(alpha, beta)))
+  y = Var('y', alpha)
+  z = Var('z', Arrow(beta, gamma))
+  print('x:', x.typ)
+  print('y:', y.typ)
+  print('z:', z.typ)
+  M = Expression(Abstract(y, Abstract(z, Apply(z, Apply(Apply(x, y), y)))))
+  print(M)
+  jdgmnt = Judgement(Context(x), Statement(M, M.typ))
+  deriv = DeriveTerm(jdgmnt)
+  print('------')
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.10d')
+  x = Var('x', Arrow(alpha, beta))
+  y = Var('y', Arrow(beta, Arrow(alpha, gamma)))
+  z = Var('z', alpha)
+  print('x:', x.typ)
+  print('y:', y.typ)
+  print('z:', z.typ)
+  M = Expression(Abstract(x, Apply(Apply(y, Apply(x, z)), z)))
+  print(M)
+  jdgmnt = Judgement(Context(y, z), Statement(M, M.typ))
+  deriv = DeriveTerm(jdgmnt)
+  print('------')
+  print(jdgmnt)
+  print('------')
+  print(deriv.FlagFormat())
 
 
 if __name__ == '__main__':
