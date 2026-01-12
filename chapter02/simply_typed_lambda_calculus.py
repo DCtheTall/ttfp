@@ -12,7 +12,7 @@ import untyped
 
 class Type:
   def __str__(self):
-    raise NotImplementedError('Do not cast Term subclass to str')
+    raise NotImplementedError('Do not cast Type subclass to str')
 
   def __hash__(self):
     return id(self)
@@ -32,7 +32,7 @@ class Arrow(Type):
     self.ret = ret
 
   def __hash__(self):
-    return id(self)
+    return hash(hash(self.arg) + hash(self.ret))
   
   def __str__(self):
     # Right associative, Apply is left associative.
@@ -594,26 +594,42 @@ class TypePlaceholder(Type):
   def __init__(self):
     self.typ = None
 
-  def Occurs(self, typ: Type):
+  def Prune(self):
+    typ = self
+    while isinstance(typ, TypePlaceholder) and typ.typ is not None:
+      typ = typ.typ
+    return typ
+
+  def OccursIn(self, typ):
     if isinstance(typ, Arrow):
-      return self.Occurs(typ.arg) or self.Occurs(typ.ret)
-    assert isinstance(typ, TypePlaceholder)
-    return self == typ
+      return self.OccursIn(typ.arg) or self.OccursIn(typ.ret)
+    if self.Prune() == typ.Prune():
+      return True
+    if typ.typ is not None:
+      return self.OccursIn(typ.typ)
+    return False
 
 
 def InferTypes(
     M: untyped.Expression, free_types: list[Type]
 ) -> list[tuple[untyped.Expression, Type]]:
+  def _Prune(typ: Type):
+    if isinstance(typ, TypePlaceholder):
+      return typ.Prune()
+    return typ
+
   def _Unify(t1: Type, t2: Type):
+    t1 = _Prune(t1)
+    t2 = _Prune(t2)
     if t1 == t2:
       return
     if isinstance(t1, TypePlaceholder):
-      if t1.Occurs(t2):
+      if t1.OccursIn(t2):
         raise TypeError('Term is not typeable due to cycle')
       t1.typ = t2
       return
     if isinstance(t2, TypePlaceholder):
-      if t2.Occurs(t1):
+      if t2.OccursIn(t1):
         raise TypeError('Term is not typeable due to cycle')
       t2.typ = t1
       return
@@ -625,7 +641,11 @@ def InferTypes(
 
   def _Infer(M: untyped.Expression, env: dict[untyped.Var, TypePlaceholder]):
     if isinstance(M.term, untyped.FreeVar):
-      return [(M, TypePlaceholder())]
+      if M.term.var in env:
+        return [(M, env[M.term.var])]
+      typ_p = TypePlaceholder()
+      env[M.term.var] = typ_p
+      return [(M, typ_p)]
     if isinstance(M.term, untyped.BoundVar):
       assert M.term.var in env
       return [(M, env[M.term.var])]
@@ -645,11 +665,9 @@ def InferTypes(
   types = _Infer(M, {})
   
   def _Assign(typ: Type, typemap: dict[TypePlaceholder, TypeVar]):
+    typ = _Prune(typ)
     if isinstance(typ, Arrow):
       typemap[typ] = Arrow(_Assign(typ.arg, typemap), _Assign(typ.ret, typemap))
-      return typemap[typ]
-    if isinstance(typ.typ, Arrow):
-      typemap[typ] = _Assign(typ.typ, typemap)
       return typemap[typ]
     if typ in typemap:
       return typemap[typ]
@@ -660,7 +678,7 @@ def InferTypes(
   typemap = {}
   for _, typ in types:
     _Assign(typ, typemap)
-  return [(N, typemap[typ_p]) for N, typ_p in types]
+  return [(N, typemap[_Prune(typ_p)]) for N, typ_p in types]
 
 
 def Rename(M: Expression, x: Var, y: Var) -> Expression:
