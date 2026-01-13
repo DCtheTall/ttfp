@@ -86,7 +86,7 @@ class Occurrence:
 
 
 class FreeVar(Occurrence):
-  pass
+  def __str__(self): return 'free'
 
 
 class BindingVar(Occurrence):
@@ -488,7 +488,7 @@ class Derivation:
     result = []
     keys: dict[Judgement, str] = {}
     for rule, concl in zip(self.rules, self.conclusions):
-      key = str(len(keys) + 1)
+      key = chr(ord('a') + len(keys))
       keys[concl] = key
       justif = self._Justification(rule, keys)
       line = f'({key}) {concl}    {justif}'
@@ -499,7 +499,6 @@ class Derivation:
   def FlagFormat(self) -> str:
     result = []
     indent_count = 0
-    var_keys: dict[Var, str] = {}
     keys: dict[Judgement, str] = {}
     abst_order: list[Var] = []
     for rule in self.rules:
@@ -516,8 +515,8 @@ class Derivation:
         key=lambda d: _SortKey(d, abst_order)
     )
     for decl in declarations:
-      key = chr(ord('a') + len(var_keys))
-      var_keys[decl.subj.var] = key
+      key = chr(ord('a') + len(keys))
+      keys[decl.subj.var] = key
       indent = '| ' * indent_count
       seperator = (
           ' ' * len(f'({key}) ')
@@ -531,15 +530,15 @@ class Derivation:
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
       if isinstance(rule, VarRule):
-        key = str(len(keys) + 1)
+        key = chr(ord('a') + len(keys))
         keys[concl] = key
-        var_key = var_keys[concl.stmt.subj.term.var]
+        var_key = keys[concl.stmt.subj.term.var]
         justif = f'(var) on ({var_key})'
       else:
         if isinstance(rule, AbstRule):
           indent_count -= 1
           indent = '| ' * indent_count
-        key = str(len(keys) + 1)
+        key = chr(ord('a') + len(keys))
         keys[concl] = key
         justif = self._Justification(rule, keys)
       line = f'({key}) {indent}{concl.stmt}    {justif}'
@@ -579,6 +578,14 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
   return d
 
 
+class ContextMissingTypeError(Exception):
+  pass
+
+
+class MissingReturnTypeError(Exception):
+  pass
+
+
 def FindTerm(
     ctx: Context, typ: Type, new_vars: list[Var]
 ) -> tuple[Expression, Derivation]:
@@ -588,26 +595,31 @@ def FindTerm(
         return ctx, Expression(decl.subj.var)
     if isinstance(typ, Arrow):
       for u in new_vars:
-        if u.typ == typ:
-          new_vars.remove(u)
-          return ctx.PushVar(u), Expression(u)
         if u.typ == typ.arg:
           new_vars.remove(u)
           ctx, body = _Helper(ctx.PushVar(u), typ.ret, new_vars)
           return ctx, Expression(Abstract(u, body))
       else:
-        raise ValueError(f'Need variable with type {typ.arg} to add to Context')
+        raise ContextMissingTypeError(
+            f'Need variable with type {typ.arg} to add to Context'
+        )
     for decl in ctx.declarations:
-      if isinstance(decl.subj.typ, Arrow):
-        if decl.subj.typ.ret == typ:
-          arg_goal = decl.subj.typ.arg
-          try:
-              ctx, v = _Helper(ctx, arg_goal, new_vars)
-              return ctx, Expression(Apply(decl.subj.var, v))
-          except ValueError:
-              continue
+      target_t = decl.subj.typ
+      arg_goals = []
+      while isinstance(target_t, Arrow) and target_t != typ:
+        arg_goals.append(target_t.arg)
+        target_t = target_t.ret
+      if target_t == typ:
+        term = Expression(decl.subj.var)
+        try:
+          for arg_goal in arg_goals:
+            _, arg = _Helper(ctx, arg_goal, new_vars)
+            term = Expression(Apply(term, arg))
+          return ctx, term
+        except MissingReturnTypeError:
+          continue
     else:
-      raise ValueError(f'No variable has or returns {typ}')
+      raise MissingReturnTypeError(f'No variable has or returns {typ}')
   _, term = _Helper(ctx, typ, new_vars)
   return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))
 

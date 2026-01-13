@@ -318,5 +318,115 @@ def RunExercises():
   print(deriv.FlagFormat())
 
 
+  print('\nExercise 2.11a')
+  goal_t = Arrow(
+        Arrow(alpha, Arrow(alpha, gamma)), Arrow(alpha, Arrow(beta, gamma))
+  )
+  x = Var('x', Arrow(alpha, Arrow(alpha, gamma)))
+  y = Var('y', alpha)
+  z = Var('z', beta)
+  M, deriv = FindTerm(Context(), goal_t, [x, y, z])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.11b')
+  goal_t = Arrow(
+      Arrow(Arrow(alpha, gamma), alpha),
+      Arrow(Arrow(alpha, gamma), Arrow(beta, gamma))
+  )
+  x = Var('x', Arrow(Arrow(alpha, gamma), alpha))
+  y = Var('y', Arrow(alpha, gamma))
+  z = Var('z', beta)
+  M, deriv = FindTerm(Context(), goal_t, [x, y, z])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.12a')
+  goal_t = Arrow(
+      Arrow(Arrow(alpha, beta), alpha),
+      Arrow(Arrow(alpha, Arrow(alpha, beta)), alpha)
+    )
+  x = Var('x', Arrow(Arrow(alpha, beta), alpha))
+  y = Var('y', Arrow(alpha, Arrow(alpha, beta)))
+  z = Var('z', alpha)
+  M, deriv = FindTerm(Context(), goal_t, [x, y, z])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.12b')
+  goal_t = Arrow(
+      Arrow(Arrow(alpha, beta), alpha),
+      Arrow(Arrow(alpha, Arrow(alpha, beta)), beta)
+    )
+  x = Var('x', Arrow(Arrow(alpha, beta), alpha))
+  y = Var('y', Arrow(alpha, Arrow(alpha, beta)))
+  z = Var('z', alpha)
+  u = Var('u', alpha)
+  M, deriv = FindTerm(Context(), goal_t, [x, y, z, u])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.13a')
+  goal_t = Arrow(Arrow(alpha, beta), Arrow(alpha, gamma))
+  print('τ:', goal_t)
+  x = Var('x', Arrow(alpha, Arrow(beta, gamma)))
+  ctx = Context(x)
+  print('Γ:', ctx)
+  y = Var('y', Arrow(alpha, beta))
+  z = Var('z', alpha)
+  M, deriv = FindTerm(ctx, goal_t, [y, z])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.13b')
+  goal_t = Arrow(alpha, Arrow(Arrow(alpha, beta), gamma))
+  print('τ:', goal_t)
+  x = Var('x', Arrow(alpha, Arrow(beta, Arrow(alpha, gamma))))
+  ctx = Context(x)
+  print('Γ:', ctx)
+  y = Var('y', Arrow(alpha, beta))
+  z = Var('z', alpha)
+  M, deriv = FindTerm(ctx, goal_t, [y, z])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+  print('Exercise 2.13c')
+  goal_t = Arrow(Arrow(alpha, gamma), Arrow(Arrow(beta, alpha), gamma))
+  print('τ:', goal_t)
+  x = Var('x', Arrow(Arrow(beta, gamma), gamma))
+  ctx = Context(x)
+  print('Γ:', ctx)
+  y = Var('y', Arrow(alpha, gamma))
+  z = Var('z', Arrow(beta, alpha))
+  u = Var('u', beta)
+  M, deriv = FindTerm(ctx, goal_t, [y, z, u, v])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 2.14')
+  goal_t = Arrow(alpha, Arrow(beta, gamma))
+  print('τ:', goal_t)
+  x = Var('x', Arrow(Arrow(gamma, beta), Arrow(alpha, gamma)))
+  ctx = Context(x)
+  print('Γ:', ctx)
+  y = Var('y', alpha)
+  z = Var('z', beta)
+  u = Var('u', gamma)
+  M, deriv = FindTerm(ctx, goal_t, [y, z, u])
+  print(M)
+  print('------')
+  print(deriv.FlagFormat())
+
+
 if __name__ == '__main__':
   RunExercises()
