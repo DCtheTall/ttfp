@@ -57,7 +57,7 @@ def RunExercises():
   b = Expression(Abstract(y, Apply(y, Abstract(x, y))))
   print(f'{b} =α {comp}:', b == comp)
   print('Exercise 1.2c')
-  c = Expression(Abstract(y, Apply(y, Abstract(x, y))))
+  c = Expression(Abstract(y, Apply(y, Abstract(y, x))))
   print(f'{c} =α {comp}:', c == comp)
 
 

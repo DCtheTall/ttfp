@@ -1,0 +1,147 @@
+Exercise 1.1a
+λx.(x z y (x x))
+Exercise 1.1b
+(λxyz.(z (x y z)) λu.u)
+
+Exercise 1.2a
+λy.(y λx.x) =α λx.(x λx.x): True
+Exercise 1.2b
+λy.(y λx.y) =α λx.(x λx.x): False
+Exercise 1.2c
+λy.(y λy.x) =α λx.(x λx.x): False
+
+Exercise 1.3
+λx.(x λz.y) =α λz.(z λz.y): True
+
+Exercise 1.4a
+Sub((λz.(z x z) (λy.(x y) x))): [(λz.(z x z) (λy.(x y) x)), λz.(z x z), (z x z), (z x), z, x, z, (λy.(x y) x), λy.(x y), (x y), x, y, x]
+Exercise 1.4c
+FV((λz.(z x z) (λy.(x y) x))): [x, x, x]
+Exercise 1.4d
+(λz.(z x z) (λy.(x y) x)) =α (λy.(y x y) (λz.(x z) x)): True
+(λz.(z x z) (λy.(x y) x)) =α (λx.(x y x) (λz.(y z) y)): False
+(λz.(z x z) (λy.(x y) x)) =α (λy.(y x y) (λy.(x y) x)): True
+(λz.(z x z) (λy.(x y) x)) =α (λv.(v x v) (λu.(u v) x)): False
+
+Exercise 1.5a
+λx.(y λy.(x y))[y := λz.(z x)]: λu.(λz.(z x) λy.(u y))
+Exercise 1.5b
+((x y z)[x := y])[y := z]: (z z z)
+Exercise 1.5c
+(λx.(x y z)[x := y])[y := z]: λx.(x z z)
+Exercise 1.5d
+λy.(y y x)[x := (y z)]: λu.(u u (y z))
+
+Exercise 1.6
+(x λz.y)[x := y][y := z]: (z λu.z)
+(x λz.y)[y := z][x := y]: (y λu.z)
+(x λz.y)[x := y, y := z]: (y λu.z)
+
+Exercise 1.7a
+Redexes((λz.(z x z) (λy.(x y) x))): [(λz.(z x z) (λy.(x y) x)), (λy.(x y) x)]
+Exercise 1.7b
+(λz.(z x z) (λy.(x y) x)) ->> (x x x (x x))
+
+Exercise 1.8
+(λx.(x x) y) ->> (y y)
+(λxy.(y x) x x) ->> (x x)
+(λx.(x x) y) =β (λxy.(y x) x x): False
+
+Exercise 1.9
+K: λxy.x
+S: λxyz.(x z (y z))
+Exercise 1.9a
+(λxy.x p q) ->> p
+(λxyz.(x z (y z)) p q r) ->> (p r (q r))
+Exercise 1.9b
+(λxyz.(x z (y z)) λxy.x λxy.x) =β λx.x: True
+Exercise 1.9c
+(S (K S) K): (λxyz.(x z (y z)) (λxy.x λxyz.(x z (y z))) λxy.x)
+(λxyz.(x z (y z)) (λxy.x λxyz.(x z (y z))) λxy.x u v w) =β (u (v w)): True
+Exercise 1.9d
+(S S S K K): (λxyz.(x z (y z)) λxyz.(x z (y z)) λxyz.(x z (y z)) λxy.x λxy.x)
+(S K K K): (λxyz.(x z (y z)) λxy.x λxy.x λxy.x)
+(S S S K K) =β (S K K K): True
+
+Exercise 1.10
+zero: λyx.x
+one: λyx.(y x)
+two: λyx.(y (y x))
+add: λuvyx.(u y (v y x))
+mult: λuvyx.(u (v y) x)
+Exercise 1.10a
+(add one one) =β two: True
+Exercise 1.10b
+(add one one) =β (mult one zero): False
+(mult one zero) =β zero: True
+
+Exercise 1.11
+succ: λuyx.(y (u y x))
+Exercise 1.11a
+(succ zero) =β one: True
+Exercise 1.11b
+(succ one) =β two: True
+
+Exercise 1.12
+true: λxy.x
+true =α K: True
+false: λxy.y
+false =α zero: True
+not: λz.(z λxy.y λxy.x)
+(not (not true) =β true: True
+(not (not false)) =β false: True
+
+Exercise 1.13
+iszero: λz.(z λxxy.y λxy.x)
+Exercise 1.13a
+(iszero zero) =β true: True
+Exercise 1.13b
+three: λyx.(y (y (y x)))
+four: λyx.(y (y (y (y x))))
+(iszero one) =β false: True
+(iszero two) =β false: True
+(iszero three) =β false: True
+(iszero four) =β false: True
+(iszero (succ (succ four))) =β false: True
+
+Exercise 1.14
+if x then u else v: λx.(x u v)
+((if x then u else v) true) ->> u
+
+Exercise 1.19
+U: λzx.(x (z z x))
+Z: (λzx.(x (z z x)) λzx.(x (z z x)))
+(Z u): (λzx.(x (z z x)) λzx.(x (z z x)) u)
+  -> (λx.(x (λzx.(x (z z x)) λzx.(x (z z x)) x)) u)
+  -> (u (λzx.(x (z z x)) λzx.(x (z z x)) u))
+  =α (u (Z u)): True
+
+Exercise 1.20a
+F: λuxy.(x u y)
+Y: λu.(λz.(u (z z)) λz.(u (z z)))
+M = (Y F): (λu.(λz.(u (z z)) λz.(u (z z))) λuxy.(x u y))
+  -> H: (λz.(λuxy.(x u y) (z z)) λz.(λuxy.(x u y) (z z)))
+  -> (λuxy.(x u y) (λz.(λuxy.(x u y) (z z)) λz.(λuxy.(x u y) (z z))))
+  =α (F H): True
+(F M) = (F (Y F)): (λuxy.(x u y) (λu.(λz.(u (z z)) λz.(u (z z))) λuxy.(x u y)))
+  -> (λuxy.(x u y) (λz.(λuxy.(x u y) (z z)) λz.(λuxy.(x u y) (z z))))
+  =α (F H): True
+(F M): (λuxy.(x u y) (λu.(λz.(u (z z)) λz.(u (z z))) λuxy.(x u y)))
+  -> λxy.(x (λu.(λz.(u (z z)) λz.(u (z z))) λuxy.(x u y)) y)
+  =α λxy.(x M y): True
+Exercise 1.20b
+F: λuxyz.(x y z u)
+Y: λu.(λz.(u (z z)) λz.(u (z z)))
+M = (Y F): (λu.(λz.(u (z z)) λz.(u (z z))) λuxyz.(x y z u))
+  -> H: (λz.(λuxyz.(x y z u) (z z)) λz.(λuxyz.(x y z u) (z z)))
+  -> (λuxyz.(x y z u) (λz.(λuxyz.(x y z u) (z z)) λz.(λuxyz.(x y z u) (z z))))
+  =α (F H): True
+(F M) = (F (Y F)): (λuxyz.(x y z u) (λu.(λz.(u (z z)) λz.(u (z z))) λuxyz.(x y z u)))
+  -> (λuxyz.(x y z u) (λz.(λuxyz.(x y z u) (z z)) λz.(λuxyz.(x y z u) (z z))))
+  =α (F H): True
+(F M x y z): (λuxyz.(x y z u) (λu.(λz.(u (z z)) λz.(u (z z))) λuxyz.(x y z u)) x y z)
+  -> (λxyz.(x y z (λu.(λz.(u (z z)) λz.(u (z z))) λuxyz.(x y z u))) x y z)
+  -> (λyz.(x y z (λu.(λz.(u (z z)) λz.(u (z z))) λupyz.(p y z u))) y z)
+  -> (λz.(x y z (λu.(λz.(u (z z)) λz.(u (z z))) λupqz.(p q z u))) z)
+  -> (x y z (λu.(λw.(u (w w)) λv.(u (v v))) λupqr.(p q r u)))
+  =α (x y z M): True

@@ -1,0 +1,57 @@
+1.3.7 Examples
+Sub((x z)): [(x z), x, z]
+Sub(λx.(x x)): [λx.(x x), (x x), x, x]
+Sub((λx.(x x) λx.(x x))): [(λx.(x x) λx.(x x)), λx.(x x), (x x), x, x, λx.(x x), (x x), x, x]
+
+1.4.2 Examples
+FV(λx.(x y)): [y]
+FV((x λx.(x y))): [x, y]
+1.4.3 Examples
+Closed(λxyz.(x x y)): True
+Closed(λxy.(x x y)): True
+Closed(λx.(x x y)): False
+
+1.5.3 Examples
+(λx.(x λz.(x y)) z) =α (λx.(x λz.(x y)) z): True
+(λx.(x λz.(x y)) z) =α (λu.(u λz.(u y)) z): True
+(λx.(x λz.(x y)) z) =α (λz.(z λx.(z y)) z): True
+(λx.(x λz.(x y)) z) =α (λy.(y λz.(y y)) z): False
+(λx.(x λz.(x y)) z) =α (λz.(z λz.(z y)) z): False
+(λx.(x λz.(x y)) z) =α (λu.(u λz.(u y)) v): False
+λxy.(x z y) =α λvy.(v z y): True
+λxy.(x z y) =α λvu.(v z u): True
+λxy.(x z y) =α λyy.(y z y): False
+λxy.(x z y) =α λzy.(z z y): False
+
+1.6.4 Examples
+λy.(y x)[x := (x y)]: λz.(z (x y))
+λx.(y x)[x := (x y)]: λz.(y z)
+λx.(y x)[x := (x y)] == λx.(y x): True
+λxy.(z z x)[z := y]: λxv.(y y x)
+λxv.(y y x) == λxy.(y y x): False
+
+1.8.2 Examples
+(λx.(x (x y)) z) -> (z (z y))
+Normal order
+(λx.(λy.(y x) z) v) -> (λy.(y v) z) -> (z v)
+Applicative order
+(λx.(λy.(y x) z) v) -> (λx.(z x) v) -> (z v)
+Self application
+(λx.(x x) λx.(x x)) -> (λx.(x x) λx.(x x))
+
+1.8.6 Lemma Example
+(λx.(λy.(y x) z) v) =β (z v): True
+(z v) =β (λx.(λy.(y x) z) v): True
+
+1.9.3 Examples
+(λx.(λy.(y x) z) v) ->> (z v)
+(z v) in β-nf: True
+Redexes((λx.(λy.(y x) z) v)): Ø
+(λx.(x x) λx.(x x)) in β-nf: False
+Redexes((λx.(x x) λx.(x x))): [(λx.(x x) λx.(x x))]
+(λx.(x x) λx.(x x)) -> (λx.(x x) λx.(x x))
+(λx.(x x x) λx.(x x x)) -> (λx.(x x x) λx.(x x x) λx.(x x x))
+(λx.(x x x) λx.(x x x) λx.(x x x)) -> (λx.(x x x) λx.(x x x) λx.(x x x) λx.(x x x))
+
+1.10.3 Example
+(λyx.(x y x) λy.(y y)) -> λx.(x λy.(y y) x)

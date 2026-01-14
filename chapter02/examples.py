@@ -138,7 +138,7 @@ def RunExamples():
   print(d, '->>', BetaReduce(d))
   print('β-Equivalence')
   e = Expression(Abstract(y, Apply(Abstract(w, c), y)))
-  print(f'{d} β= {e}:', d >> e)
+  print(f'{d}\n    β= {e}:', d >> e)
 
 
 if __name__ == '__main__':
