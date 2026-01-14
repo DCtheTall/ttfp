@@ -120,9 +120,9 @@ class Expression(Term):
       v = u.arg
       if not isinstance(v, BindingVar):
         v = BindingVar(v)
-      M = Expression(u.body)
-      M.MaybeBindFreeVarsTo(v)
-      self.term = Abstract(v, M)
+      body = Expression(u.body)
+      body.MaybeBindFreeVarsTo(v)
+      self.term = Abstract(v, body)
     else:
       raise NotImplementedError(f'Unexpected input to Expression {type(u)}')
 
@@ -314,12 +314,11 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         return xu == yu
       return False
     if isinstance(x.term, Apply):
-      ret = (
+      return (
           isinstance(y.term, Apply)
           and _Helper(x.term.fn, y.term.fn, de_brujin)
           and _Helper(x.term.arg, y.term.arg, de_brujin)
       )
-      return ret
     if isinstance(x.term, Abstract):
       if not isinstance(y.term, Abstract):
         return False

@@ -1,6 +1,6 @@
 """
-Chapter 1: Simply Lambda Calculus
-=================================
+Chapter 2: Simply Typed Lambda Calculus
+=======================================
 
 """
 
@@ -27,7 +27,7 @@ class TypeVar(Type):
 
 
 class Arrow(Type):
-  def __init__(self, arg: TypeVar, ret: TypeVar):
+  def __init__(self, arg: Type, ret: Type):
     self.arg = arg
     self.ret = ret
 
@@ -86,7 +86,7 @@ class Occurrence:
 
 
 class FreeVar(Occurrence):
-  def __str__(self): return 'free'
+  pass
 
 
 class BindingVar(Occurrence):
@@ -111,7 +111,7 @@ class BoundVar(Occurrence):
       raise TypeError(
           f'Cannot bind variable with type {self.bv.typ} '
           f'to variable with type {self.fv.typ}'
-      ) 
+      )
     self.typ = fv.typ
 
   def __str__(self):
@@ -162,10 +162,10 @@ class Abstract(Term):
     args = str(self.arg)
     if isinstance(body, Abstract):
       while isinstance(body, Abstract):
-        args += f'.λ{(body.arg)}'
+        args += f'.λ{body.arg}'
         body = body.BodyTerm()
     body_str = str(body)
-    if ':' in body_str and not isinstance(body, FreeVar):
+    if ':' in body_str and isinstance(body, Apply):
       body_str = ':'.join(body_str.split(':')[:-1])
     return f'(λ{args}.{body_str}):{self.typ}'
 
@@ -194,9 +194,9 @@ class Expression(Term):
       v = u.arg
       if not isinstance(v, BindingVar):
         v = BindingVar(v)
-      M = Expression(u.body)
-      M.MaybeBindFreeVarsTo(v)
-      self.term = Abstract(v, M)
+      body = Expression(u.body)
+      body.MaybeBindFreeVarsTo(v)
+      self.term = Abstract(v, body)
     else:
       raise NotImplementedError(f'Unexpected input to Expression {type(u)}')
     self.typ = self.term.typ
@@ -808,12 +808,11 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         return xu == yu
       return False
     if isinstance(x.term, Apply):
-      ret = (
+      return (
           isinstance(y.term, Apply)
           and _Helper(x.term.fn, y.term.fn, de_brujin)
           and _Helper(x.term.arg, y.term.arg, de_brujin)
       )
-      return ret
     if isinstance(x.term, Abstract):
       if not isinstance(y.term, Abstract):
         return False
