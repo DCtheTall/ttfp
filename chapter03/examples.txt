@@ -1,0 +1,13 @@
+Examples from 3.2
+Polymorphic identity:
+(λα:*.λx:α.x):Πα:*.(α -> α)
+(λα:*.λx:α.x):Πα:*.(α -> α) =α (λβ:*.λy:β.y):Πβ:*.(β -> β): True
+Πα:*.(α -> α) =α Πβ:*.(β -> β): True
+
+Examples from 3.3
+Type abstraction
+M: (λx:α.x):(α -> α)
+λα:*.M: (λα:*.λx:α.x):Πα:*.(α -> α)
+Type application
+((λα:*.λx:α.x):Πα:*.(α -> α) γ):(γ -> γ)
+(γ -> γ) =α (α -> α)[α := γ]: True

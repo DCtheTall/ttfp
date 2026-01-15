@@ -88,7 +88,7 @@ true =α K: True
 false: λxy.y
 false =α zero: True
 not: λz.(z λxy.y λxy.x)
-(not (not true) =β true: True
+(not (not true)) =β true: True
 (not (not false)) =β false: True
 
 Exercise 1.13

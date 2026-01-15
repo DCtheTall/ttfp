@@ -269,7 +269,7 @@ def RunExercises():
   nott = Expression(Abstract(z, Apply(Apply(z, false), true)))
   print('not:', nott)
   print(
-      '(not (not true) =β true:',
+      '(not (not true)) =β true:',
       Expression(Apply(nott, Apply(nott, true))) >> true
   )
   print(
