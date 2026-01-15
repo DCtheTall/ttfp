@@ -229,51 +229,49 @@ class RenameBindingVarError(Exception):
   pass
 
 
-def _HasBindingVar(M: Expression, y: Var) -> bool:
-  if isinstance(M.term, Var):
-    raise Exception('Should not store Var in Expression')
-  if isinstance(M.term, BindingVar):
-    raise Exception('Should not store BindingVar in Expression')
-  if (
-      isinstance(M.term, BoundVar)
-      or isinstance(M.term, FreeVar)
-  ):
-    return False
-  if isinstance(M.term, Apply):
-    return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
-  if isinstance(M.term, Abstract):
-    bv = M.term.arg
-    if bv.var == y:
-      return True
-    return _HasBindingVar(M.term.body, y)
-  raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
-
-
-def _RenameBoundVars(
-    M: Expression, x: BindingVar, y: BindingVar
-) -> Expression:
-  assert isinstance(x, BindingVar) and isinstance(y, BindingVar)
-  if isinstance(M.term, FreeVar):
-    return M
-  if isinstance(M.term, BoundVar):
-    if M.term.bv == x:
-      return BoundVar(y, FreeVar(y.var))
-    return M
-  if isinstance(M.term, Apply):
-    return Expression(
-        Apply(
-            _RenameBoundVars(M.term.fn, x, y),
-            _RenameBoundVars(M.term.arg, x, y)
-        )
-    )
-  if isinstance(M.term, Abstract):
-    return Expression(
-        Abstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
-    )
-  raise NotImplementedError(f'Unexpected input to RenameBoundVars {M}')
-
-
 def Rename(M: Expression, x: Var, y: Var) -> Expression:
+  def _HasBindingVar(M: Expression, y: Var) -> bool:
+    if isinstance(M.term, Var):
+      raise Exception('Should not store Var in Expression')
+    if isinstance(M.term, BindingVar):
+      raise Exception('Should not store BindingVar in Expression')
+    if (
+        isinstance(M.term, BoundVar)
+        or isinstance(M.term, FreeVar)
+    ):
+      return False
+    if isinstance(M.term, Apply):
+      return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
+    if isinstance(M.term, Abstract):
+      bv = M.term.arg
+      if bv.var == y:
+        return True
+      return _HasBindingVar(M.term.body, y)
+    raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
+
+  def _RenameBoundVars(
+      M: Expression, x: BindingVar, y: BindingVar
+  ) -> Expression:
+    assert isinstance(x, BindingVar) and isinstance(y, BindingVar)
+    if isinstance(M.term, FreeVar):
+      return M
+    if isinstance(M.term, BoundVar):
+      if M.term.bv == x:
+        return Expression(BoundVar(y, FreeVar(y.var)))
+      return M
+    if isinstance(M.term, Apply):
+      return Expression(
+          Apply(
+              _RenameBoundVars(M.term.fn, x, y),
+              _RenameBoundVars(M.term.arg, x, y)
+          )
+      )
+    if isinstance(M.term, Abstract):
+      return Expression(
+          Abstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
+      )
+    raise NotImplementedError(f'Unexpected input to RenameBoundVars {M}')
+
   if isinstance(M.term, FreeVar):
     if M.term.var == x:
       return Expression(y)
@@ -332,7 +330,7 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
 
 
 def Substitute(
-    M: Expression, x: Var, N: Expression, zs: list[Var],
+    M: Expression, x: Union[BindingVar, Var], N: Expression, zs: list[Var],
     binding: Optional[BindingVar] = None,
 ) -> Expression:
   if isinstance(M.term, FreeVar):

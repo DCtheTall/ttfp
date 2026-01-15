@@ -5,7 +5,7 @@ Chapter 3: Second Order Typed Lambda Calculus
 """
 
 
-from typing import Union
+from typing import Optional, Union
 
 
 class Type:
@@ -45,6 +45,9 @@ class BindingTypeVar(TOccurrence):
   def __init__(self, typ: TypeVar):
     assert isinstance(typ, TypeVar)
     self.typ = typ
+
+  def __str__(self):
+    return str(self.typ) + ':*'
   
   def ShouldBind(self, ftyp: FreeTypeVar) -> bool:
     return self.typ == ftyp
@@ -53,8 +56,9 @@ class BindingTypeVar(TOccurrence):
 class BoundTypeVar(TOccurrence):
   def __init__(self, bt: BindingTypeVar, ftyp: FreeTypeVar):
     assert isinstance(bt, BindingTypeVar)
+    assert isinstance(ftyp, FreeTypeVar)
     self.bt = bt
-    self.typ = ftyp
+    self.typ = ftyp.typ
     if self.bt.typ != self.typ:
       raise TypeError(
           f'Cannot bind variable with type {self.bt} '
@@ -92,10 +96,10 @@ class PiType(Type):
 
   def __str__(self):
     body = self.BodyType()
-    args = str(self.arg)
+    args = str(self.arg)[:-2]
     if isinstance(body, PiType):
       while isinstance(body, PiType):
-        args += f',{body.arg}'
+        args += f',{str(body.arg)[:-2]}'
         body = body.BodyType()
     return f'Π{args}:*.{body}'
   
@@ -139,6 +143,12 @@ class ExpressionType(Type):
       return TAlphaEquiv(self, other)
     assert isinstance(other, Type)
     return self.typ == other
+  
+  def Type(self) -> Type:
+    typ = self.typ
+    if isinstance(typ, TOccurrence):
+      typ = typ.typ
+    return typ
 
   def MaybeBindFreeTypesTo(self, btv: BindingTypeVar):
     if isinstance(self.typ, TypeVar):
@@ -147,7 +157,7 @@ class ExpressionType(Type):
       raise Exception('Should not store BindingTypeVar in Expression')
     elif isinstance(self.typ, FreeTypeVar):
       if btv.ShouldBind(self.typ):
-        self.typ = BoundTypeVar(btv, self.typ.typ)
+        self.typ = BoundTypeVar(btv, self.typ)
     elif isinstance(self.typ, BoundTypeVar):
       pass
     elif isinstance(self.typ, Arrow):
@@ -158,7 +168,7 @@ class ExpressionType(Type):
     else:
       raise NotImplementedError(f'Unexpected member of ExpressionType {self.typ}')
   
-  def Copy(self):
+  def Copy(self) -> 'ExpressionType':
     if isinstance(self.typ, FreeTypeVar) or isinstance(self.typ, BoundTypeVar):
       return ExpressionType(self.typ.typ)
     if isinstance(self.typ, Arrow):
@@ -166,18 +176,112 @@ class ExpressionType(Type):
     if isinstance(self.typ, PiType):
       btv = self.typ.arg
       return ExpressionType(PiType(btv.typ, self.typ.body.Copy()))
-    raise NotImplementedError(f'Unexpected member of Expression {self.term}')
+    raise NotImplementedError(
+        f'Unexpected member of ExpressionType {self.typ}'
+    )
 
 
-def TAlphaEquiv(x: ExpressionType, y: ExpressionType):
-  def _Helper(x: ExpressionType, y: ExpressionType, de_brujin: dict[TypeVar, int]):
+class RenameFreeTypeVarError(Exception):
+  pass
+
+
+class RenameBindingTypeVarError(Exception):
+  pass
+
+
+def TypeOccursFree(T: ExpressionType, x: TypeVar) -> bool:
+    if isinstance(T.typ, FreeTypeVar):
+      return T.typ == x
+    if isinstance(T.typ, TOccurrence):
+      return False
+    if isinstance(T.typ, Arrow):
+      return TypeOccursFree(T.typ.arg, x) or TypeOccursFree(T.typ.ret, x)
+    if isinstance(T.typ, PiType):
+      return TypeOccursFree(T.typ.body, x)
+    raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+
+
+def RenameType(
+    T: ExpressionType, x: Union[BindingTypeVar, TypeVar], y: TypeVar
+) -> ExpressionType:
+  def _HasBindingType(T: ExpressionType, x: TypeVar) -> bool:
+    if isinstance(T.typ, TOccurrence):
+      return False
+    if isinstance(T.typ, Arrow):
+      return _HasBindingType(T.typ.arg, x) or _HasBindingType(T.typ.ret, x)
+    if isinstance(T.typ, PiType):
+      if T.typ.arg.typ == x:
+        return True
+      return _HasBindingType(T.typ.body, x)
+    raise NotImplementedError(f'Unexpected input to HasBindingType {T}')
+
+  def _RenameBoundTypes(
+      T: ExpressionType, x: BindingTypeVar, y: BindingTypeVar
+  ) -> ExpressionType:
+    assert isinstance(x, BindingTypeVar) and isinstance(y, BindingTypeVar)
+    if isinstance(T.typ, FreeTypeVar):
+      return T
+    if isinstance(T.typ, BoundTypeVar):
+      if T.typ.bt == x:
+        return ExpressionType(BoundTypeVar(y, FreeTypeVar(y.typ)))
+      return T
+    if isinstance(T.typ, Arrow):
+      return ExpressionType(
+          Arrow(
+              _RenameBoundTypes(T.typ.arg, x, y),
+              _RenameBoundTypes(T.typ.ret, x, y)
+          )
+      )
+    if isinstance(T.typ, PiType):
+      return ExpressionType(
+          PiType(T.typ.arg, _RenameBoundTypes(T.typ.body, x, y))
+      )
+    else:
+      raise NotImplementedError(f'Unexpected input to RenameBoundTypes {T}')
+
+  if isinstance(T.typ, FreeTypeVar):
+    if T.typ.typ == x:
+      return ExpressionType(y)
+    return ExpressionType(T.typ.typ)
+  if isinstance(T.typ, BoundTypeVar):
+    return T
+  if isinstance(T.typ, Arrow):
+    return ExpressionType(
+        Arrow(RenameType(T.typ.arg, x, y), RenameType(T.typ.ret, x, y))
+    )
+  if isinstance(T.typ, PiType):
+    if TypeOccursFree(T.typ.body, y):
+      raise RenameFreeTypeVarError(f'{y} occurs free in {T.typ}')
+    if _HasBindingType(T.typ.body, y):
+      raise RenameBindingTypeVarError(f'{y} is a binding type in {T.typ}')
+    arg_t = T.typ.arg
+    U = T.typ.body
+    if arg_t == x:
+      new_arg_t = BindingTypeVar(y)
+      U = _RenameBoundTypes(U, arg_t, new_arg_t)
+      U.MaybeBindFreeTypesTo(new_arg_t)
+    else:
+      new_arg_t = arg_t
+    return ExpressionType(PiType(new_arg_t, RenameType(U, x, y)))
+
+
+DeBrujinIndices = dict[Union[TypeVar, 'Var'], int]
+
+
+def TAlphaEquiv(
+    x: ExpressionType, y: ExpressionType,
+    de_brujin: Optional[DeBrujinIndices] = None
+) -> bool:
+  def _Helper(
+      x: ExpressionType, y: ExpressionType, de_brujin: DeBrujinIndices
+  ) -> bool:
     if isinstance(x.typ, FreeTypeVar):
       return isinstance(y.typ, FreeTypeVar) and x.typ == y.typ
     if isinstance(x.typ, BoundTypeVar):
       if not isinstance(y.typ, BoundTypeVar):
         return False
-      xt = x.typ.typ
-      yt = y.typ.typ
+      xt = x.Type()
+      yt = y.Type()
       if xt in de_brujin and yt in de_brujin:
         return de_brujin[xt] == de_brujin[yt]
       if xt not in de_brujin and yt not in de_brujin:
@@ -198,7 +302,54 @@ def TAlphaEquiv(x: ExpressionType, y: ExpressionType):
       new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
       return _Helper(x.typ.body, y.typ.body, new_de_brujin)
     raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
-  return _Helper(x, y, de_brujin={})
+  return _Helper(x, y, de_brujin or {})
+
+
+def SubstituteType(
+    T: ExpressionType,
+    a: Union[BindingTypeVar, TypeVar],
+    B: ExpressionType,
+    new_types: list[TypeVar],
+    binding: Optional[BindingTypeVar] = None,
+) -> ExpressionType:
+  if isinstance(T.typ, FreeTypeVar):
+    if T.typ == a:
+      return B
+    return T
+  if isinstance(T.typ, BoundTypeVar):
+    if binding is not None and T.typ.BoundTo(binding):
+      return B
+    return T
+  if isinstance(T.typ, Arrow):
+    return ExpressionType(
+        Arrow(
+            SubstituteType(T.typ.arg, a, B, new_types, binding),
+            SubstituteType(T.typ.ret, a, B, new_types, binding)
+        )
+    )
+  if isinstance(T.typ, PiType):
+    if TypeOccursFree(B, T.typ.arg.typ):
+      if not zs:
+        raise Exception('Need more types for substitution')
+      new_t = new_types.pop()
+      assert not TypeOccuresFree(B, new_t)
+      T = Rename(T, T.typ.arg, new_t)
+    return ExpressionType(
+        PiType(T.typ.arg, SubstituteType(T.typ.body, a, B, new_types, binding))
+    )
+  raise NotImplementedError(f'Unexpected term in type for SubstituteType {T}')
+
+
+def OneStepBetaReduceType(
+    fn: 'Expression', arg: Type, new_types: list[TypeVar] = []
+) -> ExpressionType:
+  if isinstance(fn, Expression):
+    fn = fn.term
+  assert isinstance(fn, TAbstract)
+  assert isinstance(fn.Type(), PiType)
+  # Cannot use Π-types on righthand side in λ2.
+  assert not isinstance(arg, PiType)
+  return SubstituteType(fn.body.typ, fn.arg.typ, arg, new_types, fn.arg)
 
 
 class Term:
@@ -206,6 +357,19 @@ class Term:
 
   def __str__(self):
     raise NotImplementedError('Not implemented')
+
+  def Type(self):
+    typ = self.typ
+    if isinstance(typ, ExpressionType):
+      typ = typ.typ
+    if isinstance(typ, TOccurrence):
+      typ = typ.typ
+    assert (
+      isinstance(typ, TypeVar)
+      or isinstance(typ, Arrow)
+      or isinstance(typ, PiType)
+    )
+    return typ
 
 
 class Var(Term):
@@ -218,6 +382,12 @@ class Var(Term):
 
   def __hash__(self):
     return hash(str(self))
+
+  def __eq__(self, other):
+    if isinstance(other, Occurrence):
+      other = other.var
+    assert isinstance(other, Var)
+    return self.name == other.name and self.typ == other.typ
 
 
 class Occurrence:
@@ -278,11 +448,11 @@ class Apply(Term):
   def __init__(self, fn: Term, arg: Term):
     self.fn = fn
     self.arg = arg
-    if not isinstance(fn.typ, Arrow):
+    if not isinstance(fn.Type(), Arrow):
       raise TypeError(f'Left term of Apply must be Arrow type {fn.typ}')
-    if fn.typ.arg != arg.typ:
+    if fn.Type().arg != arg.typ:
       raise TypeError(f'Expected type {fn.typ.arg} got {arg.typ}')
-    self.typ = self.fn.typ.ret
+    self.typ = self.fn.Type().ret
 
   def __str__(self):
     fn = self.fn
@@ -303,6 +473,25 @@ class Apply(Term):
     return fn
 
 
+class TApply(Apply):
+  def __init__(
+      self, fn: Term, arg: Type,
+      new_types: list[TypeVar] = [], typ: Optional[Type] = None
+  ):
+    if not isinstance(fn.Type(), PiType):
+      raise TypeError(f'TApply must be used on Π-types, got {fn}')
+    self.fn = fn
+    assert not isinstance(arg, PiType)
+    self.arg = arg
+    self.new_types = new_types
+    if typ:
+      self.typ = typ
+    else:
+      self.typ = OneStepBetaReduceType(
+          Expression(self.fn), self.arg, self.new_types
+      )
+
+
 class Abstract(Term):
   def __init__(self, arg: Union[Var, BindingVar], body: Term):
     self.arg = arg
@@ -319,11 +508,13 @@ class Abstract(Term):
     body_str = str(body)
     if ':' in body_str and isinstance(body, Apply):
       body_str = ':'.join(body_str.split(':')[:-1])
+    if isinstance(body, TAbstract):
+      body_str = 'Π'.join(body_str.split('Π')[:-1])
     return f'(λ{args}.{body_str}):{self.typ}'
 
   def BodyTerm(self) -> Term:
-    # if isinstance(self.body, Expression):
-    #   return self.body.term
+    if isinstance(self.body, Expression):
+      return self.body.term
     return self.body
 
 
@@ -348,7 +539,12 @@ class Expression(Term):
     elif isinstance(u, BoundVar):
       self.term = u
     elif isinstance(u, Apply):
-      self.term = Apply(Expression(u.fn), Expression(u.arg))
+      if isinstance(u, TApply):
+        self.term = TApply(
+            Expression(u.fn), ExpressionType(u.arg), u.new_types, u.typ
+        )
+      else:
+        self.term = Apply(Expression(u.fn), Expression(u.arg))
     elif isinstance(u, Abstract):
       if isinstance(u, TAbstract):
         arg_t = u.arg
@@ -391,8 +587,11 @@ class Expression(Term):
     elif isinstance(self.term, BoundVar):
       pass
     elif isinstance(self.term, Apply):
-      self.term.fn.MaybeBindFreeVarsTo(bv)
-      self.term.arg.MaybeBindFreeVarsTo(bv)
+      if isinstance(self.term, TApply):
+        self.term.fn.MaybeBindFreeTypesTo(bv)
+      else:
+        self.term.fn.MaybeBindFreeVarsTo(bv)
+        self.term.arg.MaybeBindFreeVarsTo(bv)
     elif isinstance(self.term, Abstract):
       self.term.body.MaybeBindFreeVarsTo(bv)
     else:
@@ -416,7 +615,66 @@ class Expression(Term):
       raise NotImplementedError(f'Unexpected member of Expression {self.term}')
     self.typ.MaybeBindFreeTypesTo(btv)
 
+  def Copy(self):
+    if isinstance(self.term, FreeVar) or isinstance(self.term, BoundVar):
+      return Expression(self.term.var)
+    if isinstance(self.term, Apply):
+      if isinstance(self.term, TApply):
+        return Expression(TApply(self.term.fn.Copy(), self.term.arg.typ))
+      else:
+        return Expression(Apply(self.term.fn.Copy(), self.term.arg.Copy()))
+    if isinstance(self.term, Abstract):
+      if isinstance(self.term, TAbstract):
+        bt = self.term.arg
+        return Expression(TAbstract(bt.typ, self.term.body.Copy()))
+      else:
+        bv = self.term.arg
+        return Expression(Abstract(bv.var, self.term.body.Copy()))
+    raise NotImplementedError(f'Unexpected member of Expression {self.term}')
 
-def AlphaEquiv(x: Expression, y: Expression):
-  # assert TAlphaEquiv(x.typ, y.typ)
-  pass
+
+def AlphaEquiv(x: Expression, y: Expression) -> bool:
+  def _Helper(
+      x: Expression, y: Expression, de_brujin: DeBrujinIndices
+  ) -> bool:
+    if isinstance(x.term, FreeVar):
+      return isinstance(y.term, FreeVar) and x.term == y.term
+    if isinstance(y.term, BoundVar):
+      if not isinstance(y.term, BoundVar):
+        return False
+      xu = x.term.var
+      yu = y.term.var
+      if xu in de_brujin and yu in de_brujin:
+        return de_brujin[xu] == de_brujin[yu]
+      if xu not in de_brujin and yu not in de_brujin:
+        return xu == yu
+      return False
+    if isinstance(x.term, Apply):
+      if isinstance(x.term, TApply):
+        if not isinstance(y.term, TApply):
+          return False
+        if not _Helper(x.term.fn, y.term.fn, de_brujin):
+          return False
+        assert isinstance(x.term.arg, ExpressionType), type(x.term.arg)
+        assert isinstance(y.term.arg, ExpressionType), type(y.term.arg)
+        return TAlphaEquiv(x.term.arg, y.term.arg, de_brujin)
+      return (
+          isinstance(y.term, Apply)
+          and _Helper(x.term.fn, y.term.fn, de_brujin)
+          and _Helper(x.term.arg, y.term.arg, de_brujin)
+      )
+    if isinstance(x.term, Abstract):
+      if isinstance(x.term, TAbstract):
+        xt = x.Type().arg
+        yt = y.Type().arg
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
+        return _Helper(x.term.body, y.term.body, new_de_brujin)
+      if not isinstance(y.term, Abstract):
+        return False
+      xu = x.term.arg
+      yu = y.term.arg
+      new_de_brujin = de_brujin.copy()
+      new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
+      return _Helper(x.term.body, y.term.body, new_de_brujin)
+  return _Helper(x, y, de_brujin={})

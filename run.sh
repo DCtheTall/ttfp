@@ -1,4 +1,5 @@
 # !bin/bash
 
 # Run most recent Python chapter.
-python3 chapter02/exercises.py > chapter02/exercises.txt
+CHAPTER='03'
+python3 chapter$CHAPTER/examples.py > chapter$CHAPTER/examples.txt
