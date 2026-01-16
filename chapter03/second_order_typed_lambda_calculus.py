@@ -273,7 +273,12 @@ def RenameType(
     return ExpressionType(PiType(new_arg_t, RenameType(U, x, y)))
 
 
-DeBrujinIndices = dict[Union[TypeVar, 'Var'], int]
+class DeBrujinIndices(dict[Union[TypeVar, 'Var'], int]):
+  def __str__(self):
+    return str({str(k): str(v) for k, v in self.items()})
+
+  def copy(self):
+    return DeBrujinIndices(super().copy())
 
 
 def TAlphaEquiv(
@@ -310,7 +315,7 @@ def TAlphaEquiv(
       new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
       return _Helper(x.typ.body, y.typ.body, new_de_brujin)
     raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
-  return _Helper(x, y, de_brujin or {})
+  return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 
 def SubstituteType(
@@ -428,7 +433,7 @@ class BindingVar(Occurrence):
   def __init__(self, u: Var):
     assert isinstance(u, Var)
     self.var = u
-    self.typ = u.typ
+    self.typ = ExpressionType(u.typ)
 
   def ShouldBind(self, fv: FreeVar) -> bool:
     return self.var == fv
@@ -623,6 +628,7 @@ class Expression(Term):
         self.term.fn.MaybeBindFreeTypesTo(btv)
         self.term.arg.MaybeBindFreeTypesTo(btv)
       case Abstract():
+        self.term.arg.typ.MaybeBindFreeTypesTo(btv)
         self.term.body.MaybeBindFreeTypesTo(btv)
       case _:
         raise NotImplementedError(f'Unexpected member of Expression {self.term}')
@@ -668,8 +674,6 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
           return False
         if not _Helper(x.term.fn, y.term.fn, de_brujin):
           return False
-        assert isinstance(x.term.arg, ExpressionType), type(x.term.arg)
-        assert isinstance(y.term.arg, ExpressionType), type(y.term.arg)
         return TAlphaEquiv(x.term.arg, y.term.arg, de_brujin)
       case Apply():
         return (
@@ -690,7 +694,11 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
           return False
         xu = x.term.arg
         yu = y.term.arg
+        if not TAlphaEquiv(
+            xu.typ, yu.typ, de_brujin
+        ):
+          return False
         new_de_brujin = de_brujin.copy()
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)
-  return _Helper(x, y, de_brujin={})
+  return _Helper(x, y, de_brujin=DeBrujinIndices())

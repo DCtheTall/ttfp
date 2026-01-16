@@ -839,6 +839,8 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
           return False
         xu = x.term.arg
         yu = y.term.arg
+        if xu.typ != yu.typ:
+          return False
         new_de_brujin = de_brujin.copy()
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)

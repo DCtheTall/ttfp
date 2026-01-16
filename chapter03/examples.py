@@ -35,14 +35,23 @@ def RunExamples():
   print(f'λ{alpha}:*.M:', Expression(TAbstract(alpha, M)))
   print('Type application')
   M = Expression(TAbstract(alpha, Abstract(x, x)))
-  N = Expression(TApply(M, gamma))
-  print(N)
+  print('Polymorphic identity:', M)
+  N = Expression(TApply(M, beta))
+  print(f'Applied to {beta}:', N)
   print(
-      f'{N.typ} =α {M.Type().body}[{alpha} := {gamma}]:',
+      f'{N.typ} =α {M.Type().body}[{alpha} := {beta}]:',
       N.typ == SubstituteType(
-          M.Type().body, M.Type().arg.typ, ExpressionType(gamma), [], M.Type().arg,
+          M.Type().body,
+          M.Type().arg.typ,
+          ExpressionType(beta),
+          [],
+          M.Type().arg,
       )
   )
+  N = Expression(TApply(M, gamma))
+  print(f'Applied to {gamma}:', N)
+  z = Var('z', gamma)
+  print('Applied to term:', Expression(Apply(N, z)))
 
 
 if __name__ == '__main__':
