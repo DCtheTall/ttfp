@@ -54,5 +54,19 @@ def RunExamples():
   print('Applied to term:', Expression(Apply(N, z)))
 
 
+  print('\nExample 3.4.5')
+  ctx = Context()
+  print('Empty context:', ctx)
+  print(f'Dom({ctx}):', ctx.Dom())
+  ctx = ctx.PushTypeVar(alpha)
+  print('Add type variable:', ctx)
+  x = Var('x', Arrow(alpha, alpha))
+  ctx = ctx.PushVar(x)
+  print('Add variable:', ctx)
+  y = Var('y', Arrow(Arrow(alpha, alpha), beta))
+  ctx = ctx.PushTypeVar(beta).PushVar(y)
+  print(f'Add {beta} and {y}:', ctx)
+
+
 if __name__ == '__main__':
   RunExamples()

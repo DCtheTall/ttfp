@@ -14,3 +14,11 @@ Applied to β: ((λα:*.λx:α.x):Πα:*.(α -> α) β):(β -> β)
 (β -> β) =α (α -> α)[α := β]: True
 Applied to γ: ((λα:*.λx:α.x):Πα:*.(α -> α) γ):(γ -> γ)
 Applied to term: ((λα:*.λx:α.x):Πα:*.(α -> α) γ z:γ):γ
+
+Example 3.4.5
+Empty context: Ø
+Dom(Ø): Ø
+α
+Add type variable: α:*
+x:(α -> α)
+α

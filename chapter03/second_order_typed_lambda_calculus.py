@@ -193,18 +193,45 @@ class RenameBindingTypeVarError(Exception):
   pass
 
 
-def TypeOccursFree(T: ExpressionType, x: TypeVar) -> bool:
-  match T.typ:
-    case FreeTypeVar():
-      return T.typ == x
-    case TOccurrence():
-      return False
-    case Arrow():
-      return TypeOccursFree(T.typ.arg, x) or TypeOccursFree(T.typ.ret, x)
-    case PiType():
-      return TypeOccursFree(T.typ.body, x)
-    case _:
-      raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+class Multiset[T]:
+  elems: list[T]
+
+  def Contains(self, x: T) -> bool:
+    return x in self.elems
+
+  def __init__(self, xs: Sequence[T]):
+    self.elems = list(xs)
+
+  def __str__(self):
+    if len(self) == 0:
+      return 'Ø'
+    elems = ', '.join([str(x) for x in self])
+    return f'[{elems}]'
+
+  def __iter__(self):
+    for el in self.elems:
+      yield el
+
+  def __len__(self):
+    return len(self.elems)
+
+
+class FreeTypeVars(Multiset[TypeVar]):
+  def __init__(self, T: ExpressionType):
+    match T.typ:
+      case FreeTypeVar():
+        self.elems = [T.typ]
+      case TOccurrence():
+        return []
+      case Arrow():
+        self.elems = FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+      case PiType():
+        self.elems = FreeTypeVars(T.typ.body).elems
+      case _:
+        raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+
+  def ContainsBindingVar(self, bv: BindingVar):
+    return self.Contains(bv.var)
 
 
 def RenameType(
@@ -258,7 +285,7 @@ def RenameType(
         Arrow(RenameType(T.typ.arg, x, y), RenameType(T.typ.ret, x, y))
     )
   if isinstance(T.typ, PiType):
-    if TypeOccursFree(T.typ.body, y):
+    if FreeTypeVars(T.typ.body).Contains(y):
       raise RenameFreeTypeVarError(f'{y} occurs free in {T.typ}')
     if _HasBindingType(T.typ.body, y):
       raise RenameBindingTypeVarError(f'{y} is a binding type in {T.typ}')
@@ -342,7 +369,7 @@ def SubstituteType(
           )
       )
     case PiType():
-      if TypeOccursFree(B, T.typ.arg.typ):
+      if FreeTypeVars(B).Contains(T.typ.arg.typ):
         if not zs:
           raise Exception('Need more types for substitution')
         new_t = new_types.pop()
@@ -494,7 +521,8 @@ class Apply(Term):
 class TApply(Apply):
   def __init__(
       self, fn: Term, arg: Type,
-      new_types: list[TypeVar] = [], typ: Optional[Type] = None
+      # In case `arg` is a binding type variable in `fn`'s Π-type.
+      new_types: list[TypeVar] = []
   ):
     if not isinstance(fn.Type(), PiType):
       raise TypeError(f'TApply must be used on Π-types, got {fn}')
@@ -502,12 +530,9 @@ class TApply(Apply):
     assert not isinstance(arg, PiType)
     self.arg = arg
     self.new_types = new_types
-    if typ:
-      self.typ = typ
-    else:
-      self.typ = OneStepBetaReduceType(
-          Expression(self.fn), self.arg, self.new_types
-      )
+    self.typ = OneStepBetaReduceType(
+        Expression(self.fn), self.arg, self.new_types
+    )
 
 
 class Abstract(Term):
@@ -559,7 +584,7 @@ class Expression(Term):
         self.term = u
       case TApply():
         self.term = TApply(
-            Expression(u.fn), ExpressionType(u.arg), u.new_types, u.typ
+            Expression(u.fn), ExpressionType(u.arg), u.new_types,
         )
       case Apply():
         self.term = Apply(Expression(u.fn), Expression(u.arg))
@@ -702,3 +727,150 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)
   return _Helper(x, y, de_brujin=DeBrujinIndices())
+
+
+class Statement:
+  def __init__(self, subject: Expression, typ: Type):
+    if typ != subject.Type():
+      raise TypeError(
+          f'Cannot create Statement with expression with type {subject.typ} '
+          f'and type {typ}'
+      )
+    self.subj = subject
+    self.typ = typ
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class TypeDeclaration:
+  def __init__(self, subj_t: TypeVar):
+    if not isinstance(subj_t, TypeVar):
+      raise ValueError(f'Cannot create declaration with {subj_t}')
+    self.subj = BindingTypeVar(subj_t)
+
+  def Type(self):
+    return self.subj.typ
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Declaration:
+  def __init__(self, subject: Var):
+    if not isinstance(subject, Var):
+      raise ValueError(f'Cannot create declaration with {subject}')
+    self.subj = BindingVar(subject)
+
+  def Var(self):
+    return self.subj.var
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Domain(Multiset[Union[Var, TypeVar]]):
+    def __init__(self, types: list[TypeVar], vars: list[Var]):
+      self.vars = Multiset(vars)
+      self.types = Multiset(types)
+      self.elems = self.types.elems + self.vars.elems
+
+    def ContainsType(self, u: TypeVar):
+      assert isinstance(u, TypeVar)
+      return self.types.Contains(u)
+
+    def ContainsVar(self, u: Var):
+      assert isinstance(u, Var)
+      return self.vars.Contains(u)
+
+
+class Context:
+  def __init__(self, *vars: Sequence[Union[Var, TypeVar]]):
+    self.var_declarations = []
+    self.typ_declarations = []
+    for u in vars:
+      match u:
+        case Var():
+          self.var_declarations.append(Declaration(u))
+        case TypeVar():
+          self.typ_declarations.append(TypeDeclaration(u))
+        case _:
+          raise NotImplementedError(f'Unexpected input to Context {u}')
+    self.declarations = list(self.typ_declarations) + list(self.var_declarations)
+
+  def __str__(self):
+    if not self.declarations:
+      return 'Ø'
+    return ', '.join([str(d) for d in self.declarations])
+  
+  # Overload for subcontext, A < B returns if A is a subcontext of B
+  def __lt__(self, other):
+    for u in self.typ_declarations:
+      for v in other.typ_declarations:
+        if u.subj.var == v.subj.var:
+          break
+      else:
+        return False
+    for u in self.var_declarations:
+      for v in other.var_declarations:
+        if u.subj.var == v.subj.var:
+          break
+      else:
+        return False
+    return True
+
+  # Overload for permutation, A == B returns if A is a permutation of B
+  def __eq__(self, other):
+    return (self < other) and (other < self)
+
+  # Overload for projection, A | B
+  # def __or__(self, other: Sequence[Var]):
+  #   return Context(*(set(self.Dom()) & set(other)))
+
+  # def BindStatementFreeVars(self, sttmt: Statement):
+  #   for decl in self.declarations:
+  #     sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+  
+  def ContainsVar(self, u: Union[Var, TypeVar]):
+    match u:
+      case Var():
+        return self.Dom().ContainsVar(u)
+      case TypeVar():
+        return self.Dom().ContainsType(u)
+      case _:
+        raise NotImplementedError(f'Unexpected input to ContainsVar {u}')
+
+  # def PullVar(self, u: Var):
+  #   return Context(*[v for v in self.Dom() if v != u])
+
+  def PushTypeVar(self, u: TypeVar):
+    assert isinstance(u, TypeVar)
+    if self.ContainsVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    return Context(*self.Dom(), u)
+
+  def PushVar(self, u: Var):
+    assert isinstance(u, Var)
+    if self.ContainsVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    if not self.ContainsFreeTypes(ExpressionType(u.typ)):
+      raise TypeError(
+          f'Context {self} does not contain free type variables in {u.typ}'
+      )
+    return Context(*self.Dom(), u)
+
+  # def PushVars(self, *us: list[Var]):
+  #   return Context(*us, *self.Dom())
+
+  def Dom(self) -> Domain:
+    return Domain(
+        [decl.subj.typ for decl in self.typ_declarations],
+        [decl.subj.var for decl in self.var_declarations]
+    )
+
+  def ContainsFreeTypes(self, rho: ExpressionType):
+    assert isinstance(rho, ExpressionType)
+    for alpha in FreeTypeVars(rho):
+      if not self.ContainsVar(alpha.typ):
+        return False
+    return True
