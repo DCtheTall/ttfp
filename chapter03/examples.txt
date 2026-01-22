@@ -18,7 +18,12 @@ Applied to term: ((λα:*.λx:α.x):Πα:*.(α -> α) γ z:γ):γ
 Example 3.4.5
 Empty context: Ø
 Dom(Ø): Ø
-α
 Add type variable: α:*
-x:(α -> α)
-α
+Add variable: α:*, x:(α -> α)
+Add β and y:((α -> α) -> β): α:*, β:*, x:(α -> α), y:((α -> α) -> β)
+
+Examples from 3.4.7
+Form rule:
+α:*, β:* |- (α -> β)
+Var rule:
+α:*, β:*, x:(α -> β) |- x

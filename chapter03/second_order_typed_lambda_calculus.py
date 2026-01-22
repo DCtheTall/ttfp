@@ -70,7 +70,7 @@ class BoundTypeVar(TOccurrence):
 
 
 class Arrow(Type):
-  def __init__(self, arg: TypeVar, ret: TypeVar):
+  def __init__(self, arg: Type, ret: Type):
     self.arg = arg
     self.ret = ret
 
@@ -82,11 +82,21 @@ class Arrow(Type):
       ret_str = ret_str[1:-1]
     return f'({self.arg} -> {ret_str})'
 
+  def Arg(self):
+    if isinstance(self.arg, ExpressionType):
+      return self.arg.Type()
+    return self.arg
+
+  def Ret(self):
+    if isinstance(self.ret, ExpressionType):
+      return self.ret.Type()
+    return self.ret
+
   def __eq__(self, other):
     assert isinstance(other, Type)
     if not isinstance(other, Arrow):
       return False
-    return (self.arg, self.ret) == (other.arg, other.ret)
+    return (self.Arg(), self.Ret()) == (other.Arg(), other.Ret())
 
 
 class PiType(Type):
@@ -730,7 +740,7 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
 
 
 class Statement:
-  def __init__(self, subject: Expression, typ: Type):
+  def __init__(self, subject: Union[Expression, ExpressionType], typ: Type):
     if typ != subject.Type():
       raise TypeError(
           f'Cannot create Statement with expression with type {subject.typ} '
@@ -824,12 +834,14 @@ class Context:
     return (self < other) and (other < self)
 
   # Overload for projection, A | B
-  # def __or__(self, other: Sequence[Var]):
-  #   return Context(*(set(self.Dom()) & set(other)))
+  def __or__(self, other: Sequence[Var]):
+    return Context(*(set(self.Dom()) & set(other)))
 
-  # def BindStatementFreeVars(self, sttmt: Statement):
-  #   for decl in self.declarations:
-  #     sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+  def BindStatementFreeVars(self, sttmt: Statement):
+    for decl in self.typ_declarations:
+      sttmt.subj.MaybeBindFreeTypesTo(decl.subj)
+    for decl in self.var_declarations:
+      sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
   
   def ContainsVar(self, u: Union[Var, TypeVar]):
     match u:
@@ -874,3 +886,62 @@ class Context:
       if not self.ContainsVar(alpha.typ):
         return False
     return True
+
+
+class Judgement:
+  def __init__(self, ctx: Context, stmt: Statement):
+    self.ctx = ctx
+    self.stmt = stmt
+    self.ctx.BindStatementFreeVars(stmt)
+
+  def __str__(self):
+    return f'{self.ctx} |- {self.stmt}'
+
+
+class DerivationRule:
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if premisses:
+      ctx = premisses[0].ctx
+      for pmiss in premisses:
+        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+          raise ValueError(
+              'Cannot use different Contexts in premisses of '
+              f'the same DerivationRule: {ctx} != {pmiss.ctx}'
+          )
+    self.premisses = premisses
+  
+  def Conclusion(self) -> Judgement:
+    raise NotImplementedError(
+        'Do not call Conclusion with Derivation subclass'
+    )
+
+  def __str__(self):
+    premiss_str = ', '.join([str(p) for p in self.premisses])
+    horiz_rule = '-' * len(premiss_str)
+    if premiss_str:
+      return f'{premiss_str}\n{horiz_rule}\n{self.Conclusion()}'
+    return str(self.Conclusion())
+
+
+class FormRule(DerivationRule):
+  def __init__(self, ctx: Context, u: Type):
+    super().__init__()
+    self.ctx = ctx
+    if not self.ctx.ContainsFreeTypes(ExpressionType(u)):
+      raise TypeError(f'Context {ctx} does not contain free types in {u}')
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(ExpressionType(self.u), self.u))
+
+
+class VarRule(DerivationRule):
+  def __init__(self, ctx: Context, u: Var):
+    if not ctx.ContainsVar(u):
+      raise ValueError(f'Cannot create VarRule for {u} with Context {ctx}')
+    super().__init__()
+    self.ctx = ctx
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(Expression(self.u), self.u.typ))

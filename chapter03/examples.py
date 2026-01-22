@@ -68,5 +68,13 @@ def RunExamples():
   print(f'Add {beta} and {y}:', ctx)
 
 
+  print('\nExamples from 3.4.7')
+  print('Form rule:')
+  print(FormRule(Context(alpha, beta), Arrow(alpha, beta)).Conclusion())
+  print('Var rule:')
+  x = Var('x', Arrow(alpha, beta))
+  print(VarRule(Context(alpha, beta, x), x).Conclusion())
+
+
 if __name__ == '__main__':
   RunExamples()
