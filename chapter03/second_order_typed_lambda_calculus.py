@@ -106,12 +106,12 @@ class PiType(Type):
 
   def __str__(self):
     body = self.BodyType()
-    args = str(self.arg)[:-2]
+    args = str(self.arg)
     if isinstance(body, PiType):
       while isinstance(body, PiType):
-        args += f',{str(body.arg)[:-2]}'
+        args = f'{args[:-2]},{body.arg}'
         body = body.BodyType()
-    return f'Π{args}:*.{body}'
+    return f'Π{args}.{body}'
   
   def BodyType(self):
     if isinstance(self.body, ExpressionType):
@@ -232,7 +232,7 @@ class FreeTypeVars(Multiset[TypeVar]):
       case FreeTypeVar():
         self.elems = [T.typ]
       case TOccurrence():
-        return []
+        self.elems = []
       case Arrow():
         self.elems = FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
       case PiType():
@@ -506,7 +506,7 @@ class Apply(Term):
     if not isinstance(fn.Type(), Arrow):
       raise TypeError(f'Left term of Apply must be Arrow type {fn.typ}')
     if fn.Type().arg != arg.typ:
-      raise TypeError(f'Expected type {fn.typ.arg} got {arg.typ}')
+      raise TypeError(f'Expected type {fn.Type().arg} got {arg.typ}')
     self.typ = self.fn.Type().ret
 
   def __str__(self):
@@ -640,7 +640,7 @@ class Expression(Term):
       case BoundVar():
         pass
       case TApply():
-        self.term.fn.MaybeBindFreeTypesTo(bv)
+        self.term.fn.MaybeBindFreeVarsTo(bv)
       case Apply():
         self.term.fn.MaybeBindFreeVarsTo(bv)
         self.term.arg.MaybeBindFreeVarsTo(bv)
@@ -662,6 +662,8 @@ class Expression(Term):
       case Apply():
         self.term.fn.MaybeBindFreeTypesTo(btv)
         self.term.arg.MaybeBindFreeTypesTo(btv)
+      case TAbstract():
+        self.term.body.MaybeBindFreeTypesTo(btv)
       case Abstract():
         self.term.arg.typ.MaybeBindFreeTypesTo(btv)
         self.term.body.MaybeBindFreeTypesTo(btv)
@@ -817,7 +819,7 @@ class Context:
   def __lt__(self, other):
     for u in self.typ_declarations:
       for v in other.typ_declarations:
-        if u.subj.var == v.subj.var:
+        if u.subj.typ == v.subj.typ:
           break
       else:
         return False
@@ -852,8 +854,23 @@ class Context:
       case _:
         raise NotImplementedError(f'Unexpected input to ContainsVar {u}')
 
-  # def PullVar(self, u: Var):
-  #   return Context(*[v for v in self.Dom() if v != u])
+  def PullVar(self, u: Union[Var, TypeVar]):
+    args = []
+    for v in self.Dom():
+      match (u, v):
+        case (Var(), Var()):
+          if u != v:
+            args.append(v)
+        case (_, Var()):
+          args.append(v)
+        case (TypeVar(), TypeVar()):
+          if u != v:
+            args.append(v)
+        case (_, TypeVar()):
+          args.append(v)
+        case (_, _):
+          raise NotImplementedError(f'Unexpected input to PullVar {u}')
+    return Context(*args)
 
   def PushTypeVar(self, u: TypeVar):
     assert isinstance(u, TypeVar)
@@ -923,18 +940,6 @@ class DerivationRule:
     return str(self.Conclusion())
 
 
-class FormRule(DerivationRule):
-  def __init__(self, ctx: Context, u: Type):
-    super().__init__()
-    self.ctx = ctx
-    if not self.ctx.ContainsFreeTypes(ExpressionType(u)):
-      raise TypeError(f'Context {ctx} does not contain free types in {u}')
-    self.u = u
-
-  def Conclusion(self) -> Judgement:
-    return Judgement(self.ctx, Statement(ExpressionType(self.u), self.u))
-
-
 class VarRule(DerivationRule):
   def __init__(self, ctx: Context, u: Var):
     if not ctx.ContainsVar(u):
@@ -945,3 +950,75 @@ class VarRule(DerivationRule):
 
   def Conclusion(self) -> Judgement:
     return Judgement(self.ctx, Statement(Expression(self.u), self.u.typ))
+
+
+class ApplRule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create ApplRule with 2 Judgements')
+    super().__init__(*premisses)
+
+  def Conclusion(self) -> Judgement:
+    p_fn, p_arg = self.premisses
+    fn = p_fn.stmt.subj
+    arg = p_arg.stmt.subj
+    expr = Expression(Apply(fn, arg))
+    return Judgement(p_fn.ctx, Statement(expr, expr.typ))
+
+
+class AbstRule(DerivationRule):
+  def __init__(self, arg: Var, premiss: Judgement):
+    super().__init__(premiss)
+    p = self.premisses[0]
+    if not p.ctx.ContainsVar(arg):
+      raise ValueError(f'Cannot call Abst rule with var {arg} and Context {p.ctx}')
+    self.arg = arg
+  
+  def Conclusion(self) -> Judgement:
+    p = self.premisses[0]
+    a = self.arg
+    body = p.stmt.subj
+    expr = Expression(Abstract(a, body))
+    return Judgement(p.ctx.PullVar(a), Statement(expr, expr.Type()))
+
+
+class FormRule(DerivationRule):
+  def __init__(self, ctx: Context, u: Type):
+    super().__init__()
+    self.ctx = ctx
+    if not self.ctx.ContainsFreeTypes(ExpressionType(u)):
+      raise TypeError(f'Context {ctx} does not contain free types in {u}')
+    self.u = ExpressionType(u)
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(self.u, self.u.Type()))
+
+
+class Appl2Rule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create Appl2Rule with 2 Judgements')
+    super().__init__(*premisses)
+  
+  def Conclusion(self) -> Judgement:
+    p_fn, p_arg = self.premisses
+    fn = p_fn.stmt.subj
+    arg = p_arg.stmt.subj
+    expr = Expression(TApply(fn, arg))
+    return Judgement(p_fn.ctx, Statement(expr, expr.Type()))
+
+
+class Abst2Rule(DerivationRule):
+  def __init__(self, arg: TypeVar, premiss: Judgement):
+    super().__init__(premiss)
+    p = self.premisses[0]
+    if not p.ctx.ContainsVar(arg):
+      raise ValueError(f'Cannot call Abst rule with var {arg} and Context {p.ctx}')
+    self.arg = arg
+
+  def Conclusion(self) -> Judgement:
+    p = self.premisses[0]
+    a = self.arg
+    body = p.stmt.subj
+    expr = Expression(TAbstract(a, body))
+    return Judgement(p.ctx.PullVar(a), Statement(expr, expr.Type()))
