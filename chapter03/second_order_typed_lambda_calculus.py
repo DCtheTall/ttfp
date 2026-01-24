@@ -118,6 +118,9 @@ class PiType(Type):
       return self.body.typ
     return self.body
 
+  def __eq__(self, other):
+    return (self.arg, self.body) == (other.arg, other.body)
+
 
 class ExpressionType(Type):
   typ: Type
@@ -392,18 +395,6 @@ def SubstituteType(
       raise NotImplementedError(f'Unexpected term in type for SubstituteType {T}')
 
 
-def OneStepBetaReduceType(
-    fn: 'Expression', arg: Type, new_types: list[TypeVar] = []
-) -> ExpressionType:
-  if isinstance(fn, Expression):
-    fn = fn.term
-  assert isinstance(fn, TAbstract)
-  assert isinstance(fn.Type(), PiType)
-  # Cannot use Π-types on righthand side in λ2.
-  assert not isinstance(arg, PiType)
-  return SubstituteType(fn.body.typ, fn.arg.typ, arg, new_types, fn.arg)
-
-
 class Term:
   typ: Type
 
@@ -536,14 +527,21 @@ class TApply(Apply):
       # In case `arg` is a binding type variable in `fn`'s Π-type.
       new_types: list[TypeVar] = []
   ):
-    if not isinstance(fn.Type(), PiType):
-      raise TypeError(f'TApply must be used on Π-types, got {fn}')
+    fn_type = fn.Type()
+    if not isinstance(fn_type, PiType):
+      raise TypeError(f'TApply must be used on Π-types, got {fn_type}')
     self.fn = fn
     assert not isinstance(arg, PiType)
     self.arg = arg
     self.new_types = new_types
-    self.typ = OneStepBetaReduceType(
-        Expression(self.fn), self.arg, self.new_types
+    bound_var = fn_type.arg
+    body_type = fn_type.body
+    self.typ = SubstituteType(
+        ExpressionType(body_type),
+        bound_var,
+        ExpressionType(arg),
+        new_types,
+        bound_var if isinstance(bound_var, BindingTypeVar) else None
     )
 
 
@@ -558,7 +556,7 @@ class Abstract(Term):
     args = str(self.arg)
     if isinstance(body, Abstract):
       while isinstance(body, Abstract):
-        args += f'.λ{body.arg}'
+        args = body._AppendMultiArgStr(args, body)
         body = body.BodyTerm()
     body_str = str(body)
     if ':' in body_str and isinstance(body, Apply):
@@ -572,12 +570,20 @@ class Abstract(Term):
       return self.body.term
     return self.body
 
+  def _AppendMultiArgStr(self, args_str, body):
+    return args_str + f'.λ{body.arg}'
+
 
 class TAbstract(Abstract):
   def __init__(self, arg: Union[TypeVar, BindingTypeVar], body: Term):
     self.arg = arg
     self.body = body
     self.typ = PiType(arg, body.typ)
+
+  def _AppendMultiArgStr(self, args_str, body):
+    if isinstance(body, TAbstract):
+      args_str = args_str[:-2]
+    return args_str + f',{body.arg}'
 
 
 class Expression(Term):
@@ -731,7 +737,7 @@ class Expression(Term):
       case TAbstract():
         return Expression(
             TAbstract(
-                self.term.arg.Type(),
+                self.term.arg.typ,
                 self.term.body.ReplaceType(btv, T, new_types, binder_map)
             )
         )
@@ -985,10 +991,18 @@ def OneStepBetaReduce(M: Expression, new_vars: list[Var] = [], new_types: list[T
     case Occurrence():
       return M
     case TApply():
-      # TApply can only have a non-Π-type as its argument.
-      assert isinstance(M.term.fn.Type(), PiType)
-      M, T = M.term.fn, M.term.arg
-      return M.term.body.ReplaceType(M.term.arg, T, new_types)
+      fn, arg_t = M.term.fn, M.term.arg
+      if isinstance(fn.term, TAbstract):
+        return fn.term.body.ReplaceType(fn.term.arg, arg_t, new_types)
+      if not fn.BetaNormal():
+        return Expression(
+            TApply(
+                OneStepBetaReduce(fn, new_vars, new_types, applicative),
+                arg_t,
+                M.term.new_types
+            )
+        )
+      return M
     case Apply():
       # Applicative order: evaluate innermost-leftmost redex first.
       if applicative:
@@ -1101,7 +1115,7 @@ class Context:
   def __init__(self, *vars: Sequence[Union[Var, TypeVar]]):
     self.var_declarations = []
     self.typ_declarations = []
-    self.declarations = []  # For printing only
+    self.declarations = []  # To preserve order for printing only
     for u in vars:
       match u:
         case Var():
@@ -1148,6 +1162,8 @@ class Context:
   def BindStatementFreeVars(self, sttmt: Statement):
     for decl in self.typ_declarations:
       sttmt.subj.MaybeBindFreeTypesTo(decl.subj)
+    if isinstance(sttmt.subj, ExpressionType):
+      return
     for decl in self.var_declarations:
       sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
   
@@ -1193,6 +1209,9 @@ class Context:
           f'Context {self} does not contain free type variables in {u.typ}'
       )
     return Context(*self.Dom(), u)
+
+  def PushVars(self, *us: list[Union[Var, TypeVar]]):
+    return Context(*us, *self.Dom())
 
   def Dom(self) -> Domain:
     return Domain(
@@ -1358,7 +1377,7 @@ class Derivation:
 
   def Appl2Rule(self, fn: Judgement, arg: Judgement) -> Judgement:
     assert fn in self.conclusions
-    assert arg in self.conclusions
+    # assert arg in self.conclusions
     return self._AddRule(Appl2Rule(fn, arg))
 
   def Abst2Rule(self, arg: TypeVar, body: Judgement) -> Judgement:
@@ -1472,3 +1491,68 @@ class Derivation:
       result.append(line)
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
+
+
+def DeriveTerm(jdgmnt: Judgement) -> Derivation:
+  term_vars: list[Union[Var, TypeVar]] = []
+  def _FindVars(M: Expression):
+    match M.term:
+      case FreeVar():
+        assert jdgmnt.ctx.ContainsVar(M.term.var)
+      case BoundVar():
+        pass
+      case TAbstract():
+        term_vars.append(M.term.arg.typ)
+        _FindVars(M.term.body)
+      case Abstract():
+        term_vars.append(M.term.arg.var)
+        _FindVars(M.term.body)
+      case TApply():
+        term_vars.append(M.term.arg.Type())
+        _FindVars(M.term.fn)
+      case Apply():
+        _FindVars(M.term.fn)
+        _FindVars(M.term.arg)
+      case _:
+        raise ValueError(f'Unexpected term {M.term}')
+  _FindVars(Expression(jdgmnt.stmt.subj))
+  ctx = jdgmnt.ctx.PushVars(*term_vars)
+  d = Derivation(ctx)
+  def _Helper(M: Expression) -> DerivationRule:
+    match M.term:
+      case FreeVar():
+        return d.VarRule(M.term.var)
+      case BoundVar():
+        raise ValueError(f'Should not need rule for bound variable {M.term}')
+      case TApply():
+        arg_premiss = d.FormRule(M.term.arg)
+        return d.Appl2Rule(_Helper(M.term.fn), arg_premiss)
+      case Apply():
+        return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
+      case TAbstract():
+        return d.Abst2Rule(M.term.arg.typ, _Helper(Expression(M.term.body)))
+      case Abstract():
+        return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
+      case _:
+        raise NotImplementedError(f'Unexpected subject in judgement {M}')
+  _Helper(Expression(jdgmnt.stmt.subj))
+  return d
+
+
+def PrenexNormalForm(M: Expression, top_level: bool = True) -> bool:
+  match M.term:
+    case Occurrence():
+      return True
+    case TAbstract():
+      return top_level and PrenexNormalForm(M.term.body, top_level)
+    case Abstract():
+      return PrenexNormalForm(M.term.body, False)
+    case TApply():
+      return PrenexNormalForm(M.term.fn, False)
+    case Apply():
+      return (
+          PrenexNormalForm(M.term.fn, False)
+          and PrenexNormalForm(M.term.arg, False)
+      )
+    case _:
+      raise NotImplementedError(f'Unexpected input to PrenexNormalForm {M}')
