@@ -112,14 +112,14 @@ class PiType(Type):
         args = f'{args[:-2]},{body.arg}'
         body = body.BodyType()
     return f'Π{args}.{body}'
+
+  def __eq__(self, other):
+    return TAlphaEquiv(ExpressionType(self), ExpressionType(other))
   
   def BodyType(self):
     if isinstance(self.body, ExpressionType):
       return self.body.typ
     return self.body
-
-  def __eq__(self, other):
-    return (self.arg, self.body) == (other.arg, other.body)
 
 
 class ExpressionType(Type):
@@ -970,7 +970,9 @@ class Redexes(Multiset[Term]):
       case Occurrence():
         self.elems = []
       case TApply():
-        self.elems = [M.term]
+        self.elems = []
+        if isinstance(M.term.FuncTerm(), TAbstract):
+          self.elems.append(M.term)
         self.elems.extend(Redexes(M.term.fn).elems)
       case Apply():
         self.elems = []
@@ -1211,7 +1213,7 @@ class Context:
     return Context(*self.Dom(), u)
 
   def PushVars(self, *us: list[Union[Var, TypeVar]]):
-    return Context(*us, *self.Dom())
+    return Context(*self.Dom(), *us)
 
   def Dom(self) -> Domain:
     return Domain(
@@ -1342,7 +1344,11 @@ class Abst2Rule(DerivationRule):
     p = self.premisses[0]
     a = self.arg
     body = p.stmt.subj
-    expr = Expression(TAbstract(a, body))
+    if isinstance(body, Expression):
+      expr = Expression(TAbstract(a, body))
+    else:
+      assert isinstance(body, ExpressionType)
+      expr = ExpressionType(PiType(a, body))
     return Judgement(p.ctx.PullVar(a), Statement(expr, expr.Type()))
 
 
@@ -1516,6 +1522,13 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case _:
         raise ValueError(f'Unexpected term {M.term}')
   _FindVars(Expression(jdgmnt.stmt.subj))
+  term_vars = [
+      u for u in term_vars
+      if (
+          (isinstance(u, Var) or isinstance(u, TypeVar))
+          and not jdgmnt.ctx.ContainsVar(u)
+      )
+  ]
   ctx = jdgmnt.ctx.PushVars(*term_vars)
   d = Derivation(ctx)
   def _Helper(M: Expression) -> DerivationRule:
@@ -1536,6 +1549,41 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case _:
         raise NotImplementedError(f'Unexpected subject in judgement {M}')
   _Helper(Expression(jdgmnt.stmt.subj))
+  return d
+
+
+def DeriveType(jdgmnt: Judgement) -> Derivation:
+  term_vars: list[Union[Var, TypeVar]] = []
+  def _FindTypeVars(T: ExpressionType):
+    match T.typ:
+      case FreeTypeVar():
+        assert jdgmnt.ctx.ContainsVar(T.Type())
+      case BoundTypeVar():
+        pass
+      case PiType():
+        term_vars.append(T.typ.arg.typ)
+        _FindTypeVars(T.typ.body)
+      case Arrow():
+        _FindTypeVars(T.typ.arg)
+        _FindTypeVars(T.typ.ret)
+      case _:
+        raise ValueError(f'Unexpected term {M.term}')
+  _FindTypeVars(ExpressionType(jdgmnt.stmt.subj))
+  ctx = jdgmnt.ctx.PushVars(*term_vars)
+  d = Derivation(ctx)
+  def _Helper(T: ExpressionType) -> DerivationRule:
+    match T.typ:
+      case FreeTypeVar():
+        return d.FormRule(T.typ.typ)
+      case BoundTypeVar():
+        raise ValueError(f'Should not need rule for bound type {T.typ}')
+      case PiType():
+        return d.Abst2Rule(T.typ.arg.typ, _Helper(ExpressionType(T.typ.body)))
+      case Arrow():
+        _Helper(T.typ.arg)
+        _Helper(T.typ.ret)
+        return d.FormRule(T.typ)
+  _Helper(ExpressionType(jdgmnt.stmt.subj))
   return d
 
 

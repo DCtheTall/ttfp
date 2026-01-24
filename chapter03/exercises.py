@@ -99,7 +99,10 @@ def RunExercises():
           alpha,
           TAbstract(
               beta,
-              Abstract(f, Abstract(g, Abstract(x, Apply(g, Apply(f, Apply(f, x))))))
+              Abstract(
+                  f,
+                  Abstract(g, Abstract(x, Apply(g, Apply(f, Apply(f, x)))))
+              )
           )
       )
   )
@@ -108,6 +111,56 @@ def RunExercises():
   print(M)
   deriv = DeriveTerm(Judgement(Context(), Statement(M, M.Type())))
   print(deriv.FlagFormat())
+
+
+  print('\nExercise 3.5')
+  print('⊥:', contradict)
+  x = Var('x', contradict)
+  ctx = Context(beta, x)
+  print('Γ:', ctx)
+
+  print('Exercise 3.5a')
+  T = ExpressionType(contradict)
+  deriv = DeriveType(
+      Judgement(Context(), Statement(ExpressionType(contradict), contradict))
+  )
+  print(deriv.FlagFormat())
+
+  print('Exercise 3.5b')
+  M = Expression(TApply(x, beta))
+  deriv = DeriveTerm(Judgement(ctx, Statement(M, beta)))
+  print(deriv.FlagFormat())
+
+  print('Exercise 3.5c')
+  u = Var('u', beta)
+  M = Expression(Abstract(u, TApply(x, beta)))
+  print(M)
+  deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
+  print(deriv.FlagFormat())
+  M = Expression(TApply(x, Arrow(beta, beta)))
+  print(M)
+  deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
+  print(deriv.FlagFormat())
+  M = Expression(
+      Apply(TApply(x, Arrow(beta, Arrow(beta, beta))), TApply(x, beta))
+  )
+  print(M)
+  deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
+  print(deriv.FlagFormat())
+
+  print('Exercise 3.5d')
+  f = Var('f', Arrow(beta, Arrow(beta, beta)))
+  M = Expression(
+      Abstract(f, Apply(Apply(f, TApply(x, beta)), TApply(x, beta)))
+  )
+  print(M)
+  t1 = M.Type()
+  print('type1:', t1)
+  N = Expression(TApply(x, Arrow(Arrow(beta, Arrow(beta, beta)), beta)))
+  print(N)
+  t2 = N.Type()
+  print('type2:', t2)
+  print('type1 =α type2:', t1 == t2)
 
 if __name__ == '__main__':
   RunExercises()
