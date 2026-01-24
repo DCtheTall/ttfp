@@ -1101,15 +1101,20 @@ class Context:
   def __init__(self, *vars: Sequence[Union[Var, TypeVar]]):
     self.var_declarations = []
     self.typ_declarations = []
+    self.declarations = []  # For printing only
     for u in vars:
       match u:
         case Var():
+          for tv in FreeTypeVars(ExpressionType(u.typ)):
+            if not self.ContainsVar(tv.typ):
+              raise ValueError(f'Context {self} does not contain free types in {u}')
           self.var_declarations.append(Declaration(u))
+          self.declarations.append(self.var_declarations[-1])
         case TypeVar():
           self.typ_declarations.append(TypeDeclaration(u))
+          self.declarations.append(self.typ_declarations[-1])
         case _:
           raise NotImplementedError(f'Unexpected input to Context {u}')
-    self.declarations = list(self.typ_declarations) + list(self.var_declarations)
 
   def __str__(self):
     if not self.declarations:
@@ -1188,9 +1193,6 @@ class Context:
           f'Context {self} does not contain free type variables in {u.typ}'
       )
     return Context(*self.Dom(), u)
-
-  # def PushVars(self, *us: list[Var]):
-  #   return Context(*us, *self.Dom())
 
   def Dom(self) -> Domain:
     return Domain(
