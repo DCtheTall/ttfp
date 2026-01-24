@@ -1437,7 +1437,6 @@ class Derivation:
         self.conclusions[0].ctx.declarations,
         key=lambda d: _SortKey(d, var_abst_order, typ_abst_order)
     )
-    # TODO
     for decl in declarations:
       key = chr(ord('a') + len(keys))
       if isinstance(decl, TypeDeclaration):

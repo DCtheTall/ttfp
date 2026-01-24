@@ -5,7 +5,21 @@ Chapter 2 Exercises
 """
 
 
-from simply_typed_lambda_calculus import *
+from simply_typed_lambda_calculus import (
+    Abstract,
+    Apply,
+    Arrow,
+    Context,
+    DeriveTerm,
+    Expression,
+    FindTerm,
+    InferType,
+    InferTypes,
+    Judgement,
+    Statement,
+    TypeVar,
+    Var,
+)
 import untyped as ut
 
 

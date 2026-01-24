@@ -5,7 +5,30 @@ Chapter 3 Examples
 """
 
 
-from second_order_typed_lambda_calculus import *
+from second_order_typed_lambda_calculus import (
+    Abst2Rule,
+    AbstRule,
+    Abstract,
+    Appl2Rule,
+    ApplRule,
+    Apply,
+    Arrow,
+    Context,
+    Derivation,
+    Expression,
+    ExpressionType,
+    FormRule,
+    Judgement,
+    OneStepBetaReduce,
+    PiType,
+    Statement,
+    SubstituteType,
+    TAbstract,
+    TApply,
+    TypeVar,
+    Var,
+    VarRule,
+)
 
 
 def RunExamples():
