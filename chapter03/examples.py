@@ -15,6 +15,7 @@ def RunExamples():
   gamma = TypeVar('γ')
   sigma = TypeVar('σ')
   tau = TypeVar('τ')
+  nat = TypeVar('nat')
 
 
   print('Examples from 3.2')
@@ -120,6 +121,46 @@ def RunExamples():
   print(line)
   print('-' * len(line))
   print(rule.Conclusion())
+
+
+  print('\nExample from 3.5')
+  f = Var('f', Arrow(alpha, alpha))
+  x = Var('x', alpha)
+  ctx = Context(alpha, f, x)
+  deriv = Derivation(ctx)
+  i = deriv.VarRule(f)
+  ii = deriv.VarRule(x)
+  iii = deriv.ApplRule(i, ii)
+  iv = deriv.ApplRule(i, iii)
+  v = deriv.AbstRule(x, iv)
+  vi = deriv.AbstRule(f, v)
+  vii = deriv.Abst2Rule(alpha, vi)
+  print(deriv.FlagFormat())
+  print('Example application:')
+  succ = Var('succ', Arrow(nat, nat))
+  two = Var('two', nat)
+  M = vii.stmt.subj
+  print('Start with term:')
+  print(M)
+  M = Expression(TApply(M, nat))
+  print('Apply type nat:')
+  print(M)
+  M = Expression(Apply(M, succ))
+  print('Apply term succ:')
+  print(M)
+  M = Expression(Apply(M, two))
+  print('Apply term two:')
+  print(M)
+
+
+  print('\nExample 3.6.3')
+  print(M)
+  M = OneStepBetaReduce(M, [], [])
+  print('    ->', M)
+  M = OneStepBetaReduce(M, [], [])
+  print('    ->', M)
+  M = OneStepBetaReduce(M, [], [])
+  print('    ->', M)
 
 
 if __name__ == '__main__':

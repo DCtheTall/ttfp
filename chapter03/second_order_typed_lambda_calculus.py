@@ -76,7 +76,7 @@ class Arrow(Type):
 
   def __str__(self):
     # Right associative, Apply is left associative.
-    ret = self.ret
+    ret = self.Ret()
     ret_str = str(ret)
     if isinstance(ret, Arrow):
       ret_str = ret_str[1:-1]
@@ -384,7 +384,7 @@ def SubstituteType(
           raise Exception('Need more types for substitution')
         new_t = new_types.pop()
         assert not TypeOccuresFree(B, new_t)
-        T = Rename(T, T.typ.arg, new_t)
+        T = RenameTerm(T, T.typ.arg, new_t)
       return ExpressionType(
           PiType(T.typ.arg, SubstituteType(T.typ.body, a, B, new_types, binding))
       )
@@ -472,13 +472,15 @@ class BindingVar(Occurrence):
     self.var = u
     self.typ = ExpressionType(u.typ)
 
+  def __hash__(self):
+    return id(self)
+
   def ShouldBind(self, fv: FreeVar) -> bool:
     return self.var == fv
 
 
 class BoundVar(Occurrence):
   def __init__(self, bv: BindingVar, fv: FreeVar):
-    assert isinstance(bv, BindingVar)
     self.bv = bv
     self.var = fv.var
     bv_typ = self.bv.typ
@@ -622,6 +624,12 @@ class Expression(Term):
   def __eq__(self, other):
     return AlphaEquiv(self, other)
 
+  def Closed(self) -> bool:
+    return len(FreeVars(self)) == 0
+
+  def BetaNormal(self) -> bool:
+    return len(Redexes(self)) == 0
+
   def SetType(self, typ: ExpressionType):
     self.typ = typ
     self.term.typ = typ
@@ -688,6 +696,84 @@ class Expression(Term):
       case _:
         raise NotImplementedError(f'Unexpected member of Expression {self.term}')
 
+  def ReplaceType(
+      self, btv: BindingTypeVar, T: Type, new_types: list[TypeVar],
+      binder_map: Optional[dict[BindingVar, BindingVar]] = None
+  ):
+    if binder_map is None:
+      binder_map = {}
+    match self.term:
+      case FreeVar() | BoundVar():
+        u = self.term.var
+        typ = SubstituteType(
+            ExpressionType(u.typ), btv, ExpressionType(T), new_types, btv
+        )
+        u.typ = typ.Type()
+        if isinstance(self.term, FreeVar):
+          return Expression(FreeVar(u))
+        return Expression(BoundVar(binder_map[self.term.bv], FreeVar(u)))
+      case TApply():
+        return Expression(
+            TApply(
+                self.term.fn.ReplaceType(btv, T, new_types, binder_map),
+                SubstituteType(
+                    self.term.arg, btv, ExpressionType(T), new_types, btv
+                )
+            )
+        )
+      case Apply():
+        return Expression(
+            Apply(
+                self.term.fn.ReplaceType(btv, T, new_types, binder_map),
+                self.term.arg.ReplaceType(btv, T, new_types, binder_map)
+            )
+        )
+      case TAbstract():
+        return Expression(
+            TAbstract(
+                self.term.arg.Type(),
+                self.term.body.ReplaceType(btv, T, new_types, binder_map)
+            )
+        )
+      case Abstract():
+        u = self.term.arg.var
+        typ = SubstituteType(
+            ExpressionType(u.typ), btv, ExpressionType(T), new_types, btv
+        )
+        u.typ = typ.Type()
+        binder_map[self.term.arg] = BindingVar(u)
+        M = Expression(
+            Abstract(
+                binder_map[self.term.arg],
+                self.term.body.ReplaceType(btv, T, new_types, binder_map)
+            )
+        )
+        return M
+
+
+class FreeVars(Multiset[Var]):
+  def __init__(self, e: Expression):
+    match e.term:
+      case Var():
+        raise Exception('Should not store Var in Expression')
+      case BindingVar():
+        raise Exception('Should not store BindingVar in Expression')
+      case FreeVar():
+        self.elems = [e.term.var]
+      case BoundVar():
+        self.elems = []
+      case TApply():
+        self.elems = FreeVars(e.term.fn).elems
+      case Apply():
+        self.elems = FreeVars(e.term.fn).elems + FreeVars(e.term.arg).elems
+      case Abstract():
+        self.elems = FreeVars(e.term.body).elems
+      case _:
+        raise NotImplementedError(f'Unexpected member of Expression {e.term}')
+
+  def ContainsBindingVar(self, bv: BindingVar):
+    return self.Contains(bv.var)
+
 
 def AlphaEquiv(x: Expression, y: Expression) -> bool:
   def _Helper(
@@ -739,6 +825,221 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)
   return _Helper(x, y, de_brujin=DeBrujinIndices())
+
+
+def RenameTerm(M: Expression, x: Var, y: Var) -> Expression:
+  def _HasBindingVar(M: Expression, y: Var) -> bool:
+    match M.term:
+      case Var():
+        raise Exception('Should not store Var in Expression')
+      case BindingVar():
+        raise Exception('Should not store BindingVar in Expression')
+      case FreeVar() | BoundVar():
+        return False
+      case TApply():
+        return _HasBindingVar(M.term.fn, y)
+      case Apply():
+        return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
+      case TAbstract():
+        return _HasBindingVar(M.term.body, y)
+      case Abstract():
+        bv = M.term.arg
+        if bv.var == y:
+          return True
+        return _HasBindingVar(M.term.body, y)
+      case _:
+        raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
+
+  def _RenameBoundVars(
+      M: Expression, x: BindingVar, y: BindingVar
+  ) -> Expression:
+    assert isinstance(x, BindingVar) and isinstance(y, BindingVar)
+    match M.term:
+      case FreeVar():
+        return M
+      case BoundVar():
+        if M.term.bv == x:
+          return BoundVar(y, FreeVar(y.var))
+        return M
+      case TApply():
+        return Expression(
+            TApply(_RenameBoundVars(M.term.fn, x, y), M.term.arg)
+        )
+      case Apply():
+        return Expression(
+            Apply(
+                _RenameBoundVars(M.term.fn, x, y),
+                _RenameBoundVars(M.term.arg, x, y)
+            )
+        )
+      case TAbstract():
+        return Expression(
+            TAbstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
+        )
+      case Abstract():
+        return Expression(
+            Abstract(M.term.arg, _RenameBoundVars(M.term.body, x, y))
+        )
+      case _:
+        raise NotImplementedError(f'Unexpected input to RenameBoundVars {M}')
+
+  match M.term:
+    case FreeVar():
+      if M.term.var == x:
+        return Expression(y)
+      return Expression(M.term.var)
+    case BoundVar():
+      return M
+    case TApply():
+      return Expression(TApply(RenameTerm(M.term.fn, x, y), M.term.arg))
+    case Apply():
+      return Expression(
+          Apply(RenameTerm(M.term.fn, x, y), RenameTerm(M.term.arg, x, y))
+      )
+    case TAbstract():
+      return Expression(TAbstract(M.term.arg, RenameTerm(M.term.body, x, y)))
+    case Abstract():
+      if FreeVars(M.term.body).Contains(y):
+        raise RenameFreeVarError(f'{y} in FV({M.term})')
+      if _HasBindingVar(M.term.body, y):
+        raise RenameBindingVarError(f'{y} is a binding variable in {M.term}')
+      u = M.term.arg
+      N = M.term.body
+      if u == x:
+        v = BindingVar(y)
+        N = _RenameBoundVars(N, u, v)
+        N.MaybeBindFreeVarsTo(v)
+      else:
+        v = u
+      return Expression(Abstract(v, RenameTerm(N, x, y)))
+    case _:
+      raise NotImplementedError(f'Unexpected input to Rename {M}')
+
+
+def SubstituteTerm(
+    M: Expression, x: Var, N: Expression, zs: list[Var],
+    binding: Optional[BindingVar] = None,
+) -> Expression:
+  match M.term:
+    case FreeVar():
+      if M.term == x:
+        return N
+      return M
+    case BoundVar():
+      if binding is not None and M.term.BoundTo(binding):
+        return N
+      return M
+    case TApply():
+      return Expression(
+          Apply(SubstituteTerm(M.term.fn, x, N, zs, binding), M.term.arg)
+      )
+    case Apply():
+      return Expression(
+          Apply(
+              SubstituteTerm(M.term.fn, x, N, zs, binding),
+              SubstituteTerm(M.term.arg, x, N, zs, binding)
+          )
+      )
+    case TAbstract():
+      return Expression(
+          TAbstract(M.term.arg, SubstituteTerm(M.term.body, x, N, zs, binding))
+      )
+    case Abstract():
+      if FreeVars(N).ContainsBindingVar(M.term.arg):
+        if not zs:
+          raise Exception('Need more variables for substitution')
+        z = zs.pop()
+        assert not FreeVars(N).Contains(z)
+        M = Rename(M, M.term.arg, z)
+      return Expression(
+          Abstract(M.term.arg, SubstituteTerm(M.term.body, x, N, zs, binding))
+      )
+    case _:
+      raise NotImplementedError(f'Unexpected term in input for Substitute {M}')
+
+
+class Redexes(Multiset[Term]):
+  def __init__(self, M: Expression):
+    match M.term:
+      case Occurrence():
+        self.elems = []
+      case TApply():
+        self.elems = [M.term]
+        self.elems.extend(Redexes(M.term.fn).elems)
+      case Apply():
+        self.elems = []
+        if isinstance(M.term.FuncTerm(), Abstract):
+          self.elems.append(M.term)
+        self.elems.extend(Redexes(M.term.fn).elems)
+        self.elems.extend(Redexes(M.term.arg).elems)
+      case TAbstract():
+        self.elems = Redexes(M.term.body).elems
+      case Abstract():
+        self.elems = Redexes(M.term.body).elems
+      case _:
+        raise NotImplementedError(f'Unexpected input to Redexes {M}')
+
+
+def OneStepBetaReduce(M: Expression, new_vars: list[Var] = [], new_types: list[TypeVar] = [], applicative=False):
+  match M.term:
+    case Occurrence():
+      return M
+    case TApply():
+      # TApply can only have a non-Π-type as its argument.
+      assert isinstance(M.term.fn.Type(), PiType)
+      M, T = M.term.fn, M.term.arg
+      return M.term.body.ReplaceType(M.term.arg, T, new_types)
+    case Apply():
+      # Applicative order: evaluate innermost-leftmost redex first.
+      if applicative:
+        if not M.term.fn.BetaNormal():
+          return Expression(
+              Apply(
+                  OneStepBetaReduce(
+                      M.term.fn, new_vars, new_types, applicative
+                  ),
+                  M.term.arg
+              )
+          )
+        if not M.term.arg.BetaNormal():
+          return Expression(
+              Apply(
+                  M.term.fn,
+                  OneStepBetaReduce(
+                      M.term.arg, new_vars, new_types, applicative
+                  )
+              )
+          )
+        if isinstance(M.term.FuncTerm(), Abstract):
+          M, N = M.term.fn, M.term.arg
+          return SubstituteTerm(
+              M.term.body, M.term.arg.var, N, new_vars, M.term.arg
+          )
+        return M
+      # Normal order: evaluate outermost-leftmost redex first.
+      if isinstance(M.term.FuncTerm(), Abstract) and not isinstance(M.term.FuncTerm(), TAbstract):
+        M, N = M.term.fn, M.term.arg
+        return SubstituteTerm(M.term.body, M.term.arg.var, N, new_vars, M.term.arg)
+      if M.term.fn.BetaNormal():
+        return Expression(
+            Apply(
+                M.term.fn,
+                OneStepBetaReduce(M.term.arg, new_vars, new_types, applicative)
+            )
+        )
+      return Expression(
+          Apply(OneStepBetaReduce(M.term.fn, new_vars, new_types, applicative), M.term.arg)
+      )
+    case TAbstract():
+      return Expression(
+          TAbstract(M.term.arg, OneStepBetaReduce(M.term.body, zs, applicative))
+      )
+    case Abstract():
+      return Expression(
+          Abstract(M.term.arg, OneStepBetaReduce(M.term.body, zs, applicative))
+      )
+    case _:
+      raise NotImplementedError(f'Unexpected input to OneStepBetaReduce {M}')
 
 
 class Statement:
@@ -1022,3 +1323,151 @@ class Abst2Rule(DerivationRule):
     body = p.stmt.subj
     expr = Expression(TAbstract(a, body))
     return Judgement(p.ctx.PullVar(a), Statement(expr, expr.Type()))
+
+
+class Derivation:
+  def __init__(self, ctx: Context):
+    self.ctx = ctx
+    self.rules: list[DerivationRule] = []
+    self.conclusions: list[Judgement] = []
+
+  def _AddRule(self, rule: DerivationRule) -> Judgement:
+    self.rules.append(rule)
+    concl = rule.Conclusion()
+    self.conclusions.append(concl)
+    return concl
+
+  def VarRule(self, u: Var) -> Judgement:
+    return self._AddRule(VarRule(self.ctx, u))
+
+  def ApplRule(self, fn: Judgement, arg: Judgement) -> Judgement:
+    assert fn in self.conclusions
+    assert arg in self.conclusions
+    return self._AddRule(ApplRule(fn, arg))
+
+  def AbstRule(self, arg: Var, body: Judgement) -> Judgement:
+    assert body in self.conclusions
+    concl = self._AddRule(AbstRule(arg, body))
+    self.ctx = concl.ctx
+    return concl
+
+  def FormRule(self, t: Type) -> Judgement:
+    return self._AddRule(FormRule(self.ctx, t))
+
+  def Appl2Rule(self, fn: Judgement, arg: Judgement) -> Judgement:
+    assert fn in self.conclusions
+    assert arg in self.conclusions
+    return self._AddRule(Appl2Rule(fn, arg))
+
+  def Abst2Rule(self, arg: TypeVar, body: Judgement) -> Judgement:
+    assert body in self.conclusions
+    concl = self._AddRule(Abst2Rule(arg, body))
+    self.ctx = concl.ctx
+    return concl
+
+  def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
+    match rule:
+      case VarRule():
+        return '(var)'
+      case ApplRule():
+        fn_key = keys[rule.premisses[0]]
+        arg_key = keys[rule.premisses[1]]
+        return f'(appl) on ({fn_key}) and ({arg_key})'
+      case AbstRule():
+        body_key = keys[rule.premisses[0]]
+        return f'(abst) on ({body_key})'
+      case FormRule():
+        return '(form)'
+      case Appl2Rule():
+        fn_key = keys[rule.premisses[0]]
+        arg_key = keys[rule.premisses[1]]
+        return f'(appl2) on ({fn_key}) and ({arg_key})'
+      case Abst2Rule():
+        body_key = keys[rule.premisses[0]]
+        return f'(abst2) on ({body_key})'
+      case _:
+        raise ValueError(f'Unexpected input to Justification {rule}')
+
+  def LinearFormat(self) -> str:
+    result = []
+    keys: dict[Judgement, str] = {}
+    for rule, concl in zip(self.rules, self.conclusions):
+      key = chr(ord('a') + len(keys))
+      keys[concl] = key
+      justif = self._Justification(rule, keys)
+      line = f'({key}) {concl}    {justif}'
+      result.append(line)
+      result.append('-' * len(line))
+    return '\n'.join(result)
+
+  def FlagFormat(self) -> str:
+    result = []
+    indent_count = 0
+    keys: dict[Judgement, str] = {}
+    var_abst_order: list[Optional[Var]] = []
+    typ_abst_order: list[Optional[TypeVar]] = []
+    for rule in self.rules:
+      if isinstance(rule, Abst2Rule):
+        typ_abst_order.append(rule.arg)
+        var_abst_order.append(Var('', TypeVar('')))
+      if isinstance(rule, AbstRule):
+        var_abst_order.append(rule.arg)
+        typ_abst_order.append(TypeVar(''))
+    reverse = lambda lst: list(reversed(lst))
+    var_abst_order = reverse(var_abst_order)
+    typ_abst_order = reverse(typ_abst_order)
+    def _SortKey(
+        decl: Union[Declaration, TypeDeclaration],
+        var_abst_order: list[Var],
+        typ_abst_order: list[TypeVar]
+    ):
+      try:
+        match decl:
+          case Declaration():
+            return var_abst_order.index(decl.subj.var)
+          case TypeDeclaration():
+            return typ_abst_order.index(decl.subj.typ)
+          case _:
+            raise NotImplementedError(f'Unexpected input to SortKey {decl}')
+      except ValueError:
+        return -1
+    declarations = sorted(
+        self.conclusions[0].ctx.declarations,
+        key=lambda d: _SortKey(d, var_abst_order, typ_abst_order)
+    )
+    # TODO
+    for decl in declarations:
+      key = chr(ord('a') + len(keys))
+      if isinstance(decl, TypeDeclaration):
+        keys[decl.subj.typ] = key
+      else:
+        assert isinstance(decl, Declaration)
+        keys[decl.subj.var] = key
+      indent = '| ' * indent_count
+      seperator = (
+          ' ' * len(f'({key}) ')
+          + '| ' * indent_count
+          + '|'
+          + '-' * (len(str(decl)) + 3)
+      )
+      line = f'({key}) {indent}| {decl} |'
+      result.extend([seperator, line, seperator])
+      indent_count += 1
+    for rule, concl in zip(self.rules, self.conclusions):
+      indent = '| ' * indent_count
+      if isinstance(rule, VarRule):
+        key = chr(ord('a') + len(keys))
+        keys[concl] = key
+        var_key = keys[concl.stmt.subj.term.var]
+        justif = f'(var) on ({var_key})'
+      else:
+        if isinstance(rule, AbstRule) or isinstance(rule, Abst2Rule):
+          indent_count -= 1
+          indent = '| ' * indent_count
+        key = chr(ord('a') + len(keys))
+        keys[concl] = key
+        justif = self._Justification(rule, keys)
+      line = f'({key}) {indent}{concl.stmt}    {justif}'
+      result.append(line)
+      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+    return '\n'.join(result)
