@@ -207,7 +207,21 @@ def RunExercises():
   print(deriv.FlagFormat())
 
   print('Exercise 3.6c')
-  T = ExpressionType(PiType(alpha, PiType(beta, PiType(gamma, Arrow(Arrow(alpha, Arrow(Arrow(beta, alpha), gamma)), Arrow(alpha, gamma))))))
+  T = ExpressionType(
+      PiType(
+          alpha,
+          PiType(
+              beta,
+              PiType(
+                  gamma,
+                  Arrow(
+                      Arrow(alpha, Arrow(Arrow(beta, alpha), gamma)),
+                      Arrow(alpha, gamma)
+                  )
+              )
+          )
+      )
+  )
   print(T)
   ctx = Context()
   print('Γ:', ctx)
@@ -216,6 +230,49 @@ def RunExercises():
   z = Var('z', beta)
   _, deriv = FindTerm(ctx, T, [x, y, z])
   print(deriv.FlagFormat())
+
+
+  print('\nExercise 3.7')
+  print('⊥:', contradict)
+  x = Var('x', Arrow(alpha, contradict))
+  f = Var('f', Arrow(Arrow(alpha, alpha), alpha))
+  ctx = Context(alpha, beta, x, f)
+  print('Γ:', ctx)
+  print(f'Term with type {alpha}:')
+  u = Var('u', alpha)
+  M = Expression(Apply(f, Abstract(u, u)))
+  print(M)
+  deriv = DeriveTerm(Judgement(ctx, Statement(M, alpha)))
+  print(deriv.FlagFormat())
+  print(f'Term with type {beta}:')
+  N = Expression(TApply(Apply(x, M), beta))
+  print(N)
+  deriv = DeriveTerm(Judgement(ctx, Statement(N, beta)))
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 3.8')
+  T1 = ExpressionType(
+      PiType(alpha, PiType(beta, Arrow(alpha, Arrow(beta, alpha))))
+  )
+  print('T1:', T1)
+  x = Var('x', alpha)
+  y = Var('y', beta)
+  term, deriv = FindTerm(Context(), T1, [x, y])
+  print(term)
+  print(deriv.FlagFormat())
+  T2 = ExpressionType(
+      PiType(alpha, Arrow(alpha, PiType(beta, Arrow(beta, alpha))))
+  )
+  print('T2:', T2)
+  M = Expression(
+      TAbstract(alpha, Abstract(x, TAbstract(beta, Abstract(y, x))))
+  )
+  print(M)
+  deriv = DeriveTerm(Judgement(Context(), Statement(M, T2.Type())))
+  print(deriv.FlagFormat())
+
+  
 
 if __name__ == '__main__':
   RunExercises()

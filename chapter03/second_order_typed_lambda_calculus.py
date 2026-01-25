@@ -554,10 +554,9 @@ class Abstract(Term):
   def __str__(self):
     body = self.BodyTerm()
     args = str(self.arg)
-    if isinstance(body, Abstract):
-      while isinstance(body, Abstract):
-        args = body._AppendMultiArgStr(args, body)
-        body = body.BodyTerm()
+    while isinstance(body, Abstract):
+      args = body._AppendMultiArgStr(args, body)
+      body = body.BodyTerm()
     body_str = str(body)
     if ':' in body_str and isinstance(body, Apply):
       body_str = ':'.join(body_str.split(':')[:-1])
@@ -581,9 +580,10 @@ class TAbstract(Abstract):
     self.typ = PiType(arg, body.typ)
 
   def _AppendMultiArgStr(self, args_str, body):
-    if isinstance(body, TAbstract):
+    if isinstance(body, TAbstract) and args_str[-2:] == ':*':
       args_str = args_str[:-2]
-    return args_str + f',{body.arg}'
+      return args_str + f',{body.arg}'
+    return args_str + f'.λ{body.arg}'
 
 
 class Expression(Term):
@@ -953,10 +953,12 @@ def SubstituteTerm(
     case Abstract():
       if FreeVars(N).ContainsBindingVar(M.term.arg):
         if not zs:
-          raise Exception('Need more variables for substitution')
+          raise Exception(
+              f'Need more variables for substitution for type {M.term.arg.typ}'
+          )
         z = zs.pop()
         assert not FreeVars(N).Contains(z)
-        M = Rename(M, M.term.arg, z)
+        M = RenameTerm(M, M.term.arg, z)
       return Expression(
           Abstract(M.term.arg, SubstituteTerm(M.term.body, x, N, zs, binding))
       )
@@ -1643,7 +1645,7 @@ def FindTerm(
   
   def _ApplySubst(t: Type, substitution_map: dict[TypeVar, Type]) -> Type:
     if isinstance(t, Arrow):
-      return Arrow(ApplySubst(t.arg), ApplySubst(t.ret))
+      return Arrow(_ApplySubst(t.arg), _ApplySubst(t.ret))
     for tv, replacement in substitution_map.items():
       if t == tv:
         return replacement
@@ -1701,7 +1703,7 @@ def FindTerm(
             if tv not in substitution_map:
               raise TermNotFoundError('Ambiguous type parameter')
             replacement = subst_map[tv]
-            current_term = Expression(TApply(cur_term, replacement))
+            cur_term = Expression(TApply(cur_term, replacement))
           for need_arg_type in real_arg_types:
             ctx, arg_term = _Helper(ctx, need_arg_type, new_visited, new_vars)
             cur_term = Expression(Apply(cur_term, arg_term))
