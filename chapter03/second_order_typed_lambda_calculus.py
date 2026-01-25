@@ -1228,6 +1228,12 @@ class Context:
         return False
     return True
 
+  def Insersect(self, other):
+    if self < other:
+      return self
+    assert other < self
+    return other
+
 
 class Judgement:
   def __init__(self, ctx: Context, stmt: Statement):
@@ -1287,7 +1293,7 @@ class ApplRule(DerivationRule):
     fn = p_fn.stmt.subj
     arg = p_arg.stmt.subj
     expr = Expression(Apply(fn, arg))
-    return Judgement(p_fn.ctx, Statement(expr, expr.typ))
+    return Judgement(p_fn.ctx.Insersect(p_arg.ctx), Statement(expr, expr.typ))
 
 
 class AbstRule(DerivationRule):
@@ -1587,20 +1593,121 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
   return d
 
 
-def PrenexNormalForm(M: Expression, top_level: bool = True) -> bool:
-  match M.term:
-    case Occurrence():
+def PrenexNormalForm(T: Type, top_level: bool = True) -> bool:
+  # Prenex normal form: Only top-level abstractions can be Π-types.
+  if isinstance(T, ExpressionType):
+    T = T.Type()
+  match T:
+    case TypeVar():
       return True
-    case TAbstract():
-      return top_level and PrenexNormalForm(M.term.body, top_level)
-    case Abstract():
-      return PrenexNormalForm(M.term.body, False)
-    case TApply():
-      return PrenexNormalForm(M.term.fn, False)
-    case Apply():
+    case PiType():
+      return top_level and PrenexNormalForm(T.body, top_level)
+    case Arrow():
       return (
-          PrenexNormalForm(M.term.fn, False)
-          and PrenexNormalForm(M.term.arg, False)
+          PrenexNormalForm(T.Arg(), False) and PrenexNormalForm(T.Ret(), False)
       )
     case _:
-      raise NotImplementedError(f'Unexpected input to PrenexNormalForm {M}')
+      raise NotImplementedError(f'Unexpected input to PrenexNormalForm {T}')
+
+
+class TermNotFoundError(Exception):
+  pass
+
+
+class MissingTermForTypeError(Exception):
+  pass
+
+
+def FindTerm(
+    ctx: Context, typ: ExpressionType, new_vars: list[Var]
+) -> tuple[Expression, Derivation]:
+  if not PrenexNormalForm(typ):
+    raise TypeError(f'{typ} is not a Rank-1 polymorphism')
+
+  def _Unify(
+      candidate: Type, target: Type, type_params: list[BindingTypeVar],
+      subsitution_map: dict[TypeVar, Type]
+  ) -> bool:
+    for tv in type_params:
+      if candidate == target: 
+        if tv in substitution_map:
+          return substitution_map[tv] == target
+        substitution_map[tv] = target
+        return True
+    if isinstance(candidate, Arrow) and isinstance(target, Arrow):
+      return (
+          _Unify(candidate.arg, target.arg, type_params, substituion_map)
+          and _Unify(candidate.ret, target.ret, type_params, substituion_map)
+      )
+    return candidate == target
+  
+  def _ApplySubst(t: Type, substitution_map: dict[TypeVar, Type]) -> Type:
+    if isinstance(t, Arrow):
+      return Arrow(ApplySubst(t.arg), ApplySubst(t.ret))
+    for tv, replacement in substitution_map.items():
+      if t == tv:
+        return replacement
+    return t
+
+  def _Helper(
+      ctx: Context, typ: ExpressionType, visited: set[str], new_vars: list[Var]
+  ):
+    if str(typ) in visited:
+      raise TermNotFoundError(f'Cycle detected in {typ}')
+    new_visited = visited | {str(typ)}
+    match typ.Type():
+      case PiType():
+        ctx, body_term = _Helper(
+            ctx.PushTypeVar(typ.Type().arg.typ),
+            ExpressionType(typ.Type().body),
+            new_visited,
+            new_vars
+        )
+        return ctx, Expression(TAbstract(typ.Type().arg, body_term))
+      case Arrow():
+        for u in new_vars:
+          if typ.Type().arg == u.typ:
+            new_vars.remove(u)
+            break
+        else:
+          raise MissingTermForTypeError(
+              f'Need fresh variable with type {typ.Type().arg}'
+          )
+        ctx, body = _Helper(
+            ctx.PushVar(u), ExpressionType(typ.Type().ret), new_visited, new_vars
+        )
+        return ctx, Expression(Abstract(u, body))
+    for decl in ctx.declarations:
+      if isinstance(decl, TypeDeclaration):
+        continue
+      candidate_term = Expression(decl.subj.var)
+      candidate_typ = decl.subj.typ.Type()
+      type_params = []
+      while isinstance(candidate_typ, PiType):
+        type_params.append(candidate_typ.arg)
+        candidate_typ = candidate_typ.body.Type()
+      arg_types = []
+      while isinstance(candidate_typ, Arrow):
+        arg_types.append(candidate_typ.arg)
+        candidate_typ = candidate_typ.Ret()
+      subst_map = {}
+      if _Unify(candidate_typ, typ.Type(), type_params, subst_map):
+        try:
+          cur_term = candidate_term
+          real_arg_types = []
+          for arg_t in arg_types:
+            real_arg_types.append(_ApplySubst(arg_t, subst_map))
+          for tv in type_params:
+            if tv not in substitution_map:
+              raise TermNotFoundError('Ambiguous type parameter')
+            replacement = subst_map[tv]
+            current_term = Expression(TApply(cur_term, replacement))
+          for need_arg_type in real_arg_types:
+            ctx, arg_term = _Helper(ctx, need_arg_type, new_visited, new_vars)
+            cur_term = Expression(Apply(cur_term, arg_term))
+          return ctx, cur_term
+        except TermNotFoundError:
+          continue
+    raise TermNotFoundError(f'Could not find term for {typ}')
+  ctx, term = _Helper(ctx, typ, set(), new_vars)
+  return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))

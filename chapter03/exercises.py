@@ -15,6 +15,7 @@ def RunExercises():
   alpha = TypeVar('α')
   beta = TypeVar('β')
   gamma = TypeVar('γ')
+  delta = TypeVar('δ')
   nat = TypeVar('nat')
   boolT = TypeVar('bool')
   contradict = PiType(alpha, alpha)
@@ -161,6 +162,60 @@ def RunExercises():
   t2 = N.Type()
   print('type2:', t2)
   print('type1 =α type2:', t1 == t2)
+
+
+  print('\nExercise 3.6a')
+  T = ExpressionType(
+      PiType(
+          alpha,
+          PiType(
+              beta,
+              Arrow(
+                  Arrow(nat, alpha),
+                  Arrow(Arrow(alpha, Arrow(nat, beta)), Arrow(nat, beta))
+              )
+          )
+      )
+  )
+  ctx = Context(nat)
+  x = Var('x', Arrow(nat, alpha))
+  y = Var('y', Arrow(alpha, Arrow(nat, beta)))
+  z = Var('z', nat)
+  print(T)
+  print('Γ:', ctx)
+  _, deriv = FindTerm(ctx, T, [x, y, z])
+  print(deriv.FlagFormat())
+
+  print('Exercise 3.6b')
+  T = ExpressionType(
+      PiType(
+          delta,
+          Arrow(
+              Arrow(Arrow(alpha, gamma), delta),
+              Arrow(Arrow(alpha, beta), Arrow(Arrow(beta, gamma), delta))
+          )
+      )
+  )
+  print(T)
+  ctx = Context(alpha, beta, gamma)
+  print('Γ:', ctx)
+  x = Var('x', Arrow(Arrow(alpha, gamma), delta))
+  y = Var('y', Arrow(alpha, beta))
+  z = Var('z', Arrow(beta, gamma))
+  u = Var('u', alpha)
+  _, deriv = FindTerm(ctx, T, [x, y, z, u])
+  print(deriv.FlagFormat())
+
+  print('Exercise 3.6c')
+  T = ExpressionType(PiType(alpha, PiType(beta, PiType(gamma, Arrow(Arrow(alpha, Arrow(Arrow(beta, alpha), gamma)), Arrow(alpha, gamma))))))
+  print(T)
+  ctx = Context()
+  print('Γ:', ctx)
+  x = Var('x', Arrow(alpha, Arrow(Arrow(beta, alpha), gamma)))
+  y = Var('y', alpha)
+  z = Var('z', beta)
+  _, deriv = FindTerm(ctx, T, [x, y, z])
+  print(deriv.FlagFormat())
 
 if __name__ == '__main__':
   RunExercises()
