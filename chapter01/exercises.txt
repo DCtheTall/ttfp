@@ -92,7 +92,7 @@ not: λz.(z λxy.y λxy.x)
 (not (not false)) =β false: True
 
 Exercise 1.13
-iszero: λz.(z λxxy.y λxy.x)
+iszero: λz.(z λuxy.y λxy.x)
 Exercise 1.13a
 (iszero zero) =β true: True
 Exercise 1.13b

@@ -279,7 +279,7 @@ def RunExercises():
 
 
   print('\nExercise 1.13')
-  iszero = Expression(Abstract(z, Apply(Apply(z, Abstract(x, false)), true)))
+  iszero = Expression(Abstract(z, Apply(Apply(z, Abstract(u, false)), true)))
   print('iszero:', iszero)
 
   print('Exercise 1.13a')
