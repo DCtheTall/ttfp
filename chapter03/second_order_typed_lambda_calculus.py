@@ -76,8 +76,8 @@ class Arrow(Type):
 
   def __str__(self):
     # Right associative, Apply is left associative.
+    ret_str = str(self.ret)
     ret = self.Ret()
-    ret_str = str(ret)
     if isinstance(ret, Arrow):
       ret_str = ret_str[1:-1]
     return f'({self.arg} -> {ret_str})'
@@ -126,6 +126,7 @@ class PiType(Type):
 
 class ExpressionType(Type):
   typ: Type
+  aliases: list[tuple[ExpressionType, str]] = []
 
   def __init__(self, typ: Type):
     match typ:
@@ -151,6 +152,9 @@ class ExpressionType(Type):
         )
   
   def __str__(self):
+    for other, alias in ExpressionType.aliases:
+      if self == other:
+        return alias
     return str(self.typ)
 
   def __eq__(self, other):
@@ -197,6 +201,9 @@ class ExpressionType(Type):
         raise NotImplementedError(
             f'Unexpected member of ExpressionType {self.typ}'
         )
+
+  def AliasType(self, alias: str):
+    ExpressionType.aliases.append((self, alias))
 
 
 class RenameFreeTypeVarError(Exception):
@@ -506,7 +513,7 @@ class Apply(Term):
     fn = self.fn
     if isinstance(fn, Expression):
       fn = fn.term
-    fn_str = str(fn)
+    fn_str = str(self.fn)
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
     arg = str(self.arg)
@@ -608,6 +615,7 @@ class TAbstract(Abstract):
 class Expression(Term):
   term: Term
   typ: ExpressionType
+  aliases: list[tuple[Expression, str]] = []
 
   def __init__(self, u: Term):
     match u:
@@ -641,6 +649,9 @@ class Expression(Term):
     self.SetType(ExpressionType(u.typ))
 
   def __str__(self):
+    for other, alias in Expression.aliases:
+      if self == other:
+        return alias
     return str(self.term)
 
   def __eq__(self, other):
@@ -764,9 +775,16 @@ class Expression(Term):
         )
         u = Var(u.name, typ.Type())
         binder_map[self.term.arg] = BindingVar(u)
-        body = self.term.body.ReplaceType(btv, T, new_types, binder_map)
-        M = Expression(Abstract(binder_map[self.term.arg], body))
+        M = Expression(
+            Abstract(
+                binder_map[self.term.arg],
+                self.term.body.ReplaceType(btv, T, new_types, binder_map)
+            )
+        )
         return M
+
+  def AliasTerm(self, alias: str):
+    Expression.aliases.append((self, alias))
 
 
 class FreeVars(Multiset[Var]):
@@ -819,6 +837,7 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
       case Apply():
         return (
             isinstance(y.term, Apply)
+            and not isinstance(y.term, TApply)
             and _Helper(x.term.fn, y.term.fn, de_brujin)
             and _Helper(x.term.arg, y.term.arg, de_brujin)
         )
@@ -831,10 +850,11 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)
       case Abstract():
-        if not isinstance(y.term, Abstract):
+        if not isinstance(y.term, Abstract) or isinstance(y.term, TAbstract):
           return False
         xu = x.term.arg
         yu = y.term.arg
+        assert isinstance(yu.typ, ExpressionType), type(yu)
         if not TAlphaEquiv(
             xu.typ, yu.typ, de_brujin
         ):
@@ -1690,7 +1710,7 @@ def FindTerm(
   
   def _ApplySubst(t: Type, substitution_map: dict[TypeVar, Type]) -> Type:
     if isinstance(t, Arrow):
-      return Arrow(_ApplySubst(t.arg), _ApplySubst(t.ret))
+      return ExpressionType(Arrow(_ApplySubst(t.arg), _ApplySubst(t.ret)))
     for tv, replacement in substitution_map.items():
       if t == tv:
         return replacement
