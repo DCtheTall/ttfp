@@ -503,11 +503,11 @@ def RunExercises():
   print('Neg:', Neg)
   Neg.AliasTerm('Neg')
   NTrue = Expression(Apply(Neg, Tru))
-  print('(Neg True):', NTrue)
+  print(NTrue)
   NTrue = BetaReduce(NTrue)
   print('    ->>', NTrue)
   NFalse = Expression(Apply(Neg, Fls))
-  print('(Neg False):', NFalse)
+  print(NFalse)
   NFalse = BetaReduce(NFalse)
   print('    ->>', NFalse)
 

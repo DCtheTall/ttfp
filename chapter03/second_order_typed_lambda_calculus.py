@@ -275,49 +275,53 @@ def RenameType(
       T: ExpressionType, x: BindingTypeVar, y: BindingTypeVar
   ) -> ExpressionType:
     assert isinstance(x, BindingTypeVar) and isinstance(y, BindingTypeVar)
-    if isinstance(T.typ, FreeTypeVar):
-      return T
-    if isinstance(T.typ, BoundTypeVar):
-      if T.typ.bt == x:
-        return ExpressionType(BoundTypeVar(y, FreeTypeVar(y.typ)))
-      return T
-    if isinstance(T.typ, Arrow):
-      return ExpressionType(
-          Arrow(
-              _RenameBoundTypes(T.typ.arg, x, y),
-              _RenameBoundTypes(T.typ.ret, x, y)
-          )
-      )
-    if isinstance(T.typ, PiType):
-      return ExpressionType(
-          PiType(T.typ.arg, _RenameBoundTypes(T.typ.body, x, y))
-      )
-    else:
-      raise NotImplementedError(f'Unexpected input to RenameBoundTypes {T}')
+    match T.typ:
+      case FreeTypeVar():
+        return T
+      case BoundTypeVar():
+        if T.typ.bt == x:
+          return ExpressionType(BoundTypeVar(y, FreeTypeVar(y.typ)))
+        return T
+      case Arrow():
+        return ExpressionType(
+            Arrow(
+                _RenameBoundTypes(T.typ.arg, x, y),
+                _RenameBoundTypes(T.typ.ret, x, y)
+            )
+        )
+      case PiType():
+        return ExpressionType(
+            PiType(T.typ.arg, _RenameBoundTypes(T.typ.body, x, y))
+        )
+      case _:
+        raise NotImplementedError(f'Unexpected input to RenameBoundTypes {T}')
 
-  if isinstance(T.typ, FreeTypeVar):
-    if T.typ.typ == x:
-      return ExpressionType(y)
-    return ExpressionType(T.typ.typ)
-  if isinstance(T.typ, BoundTypeVar):
-    return T
-  if isinstance(T.typ, Arrow):
-    return ExpressionType(
-        Arrow(RenameType(T.typ.arg, x, y), RenameType(T.typ.ret, x, y))
-    )
-  if isinstance(T.typ, PiType):
-    if FreeTypeVars(T.typ.body).Contains(y):
-      raise RenameFreeTypeVarError(f'{y} occurs free in {T.typ}')
-    if _HasBindingType(T.typ.body, y):
-      raise RenameBindingTypeVarError(f'{y} is a binding type in {T.typ}')
-    arg_t = T.typ.arg
-    U = T.typ.body
-    if arg_t == x:
-      new_arg_t = BindingTypeVar(y)
-      U = _RenameBoundTypes(U, arg_t, new_arg_t)
-    else:
-      new_arg_t = arg_t
-    return ExpressionType(PiType(new_arg_t, RenameType(U, x, y)))
+  match T.typ:
+    case FreeTypeVar():
+      if T.typ.typ == x:
+        return ExpressionType(y)
+      return ExpressionType(T.typ.typ)
+    case BoundTypeVar():
+      return T
+    case Arrow():
+      return ExpressionType(
+          Arrow(RenameType(T.typ.arg, x, y), RenameType(T.typ.ret, x, y))
+      )
+    case PiType():
+      if FreeTypeVars(T.typ.body).Contains(y):
+        raise RenameFreeTypeVarError(f'{y} occurs free in {T.typ}')
+      if _HasBindingType(T.typ.body, y):
+        raise RenameBindingTypeVarError(f'{y} is a binding type in {T.typ}')
+      arg_t = T.typ.arg
+      U = T.typ.body
+      if arg_t == x:
+        new_arg_t = BindingTypeVar(y)
+        U = _RenameBoundTypes(U, arg_t, new_arg_t)
+      else:
+        new_arg_t = arg_t
+      return ExpressionType(PiType(new_arg_t, RenameType(U, x, y)))
+    case _:
+      raise NotImplementedError(f'Unexpected input to RenameType {T}')
 
 
 class DeBrujinIndices(dict[Union[TypeVar, 'Var'], int]):
@@ -335,33 +339,35 @@ def TAlphaEquiv(
   def _Helper(
       x: ExpressionType, y: ExpressionType, de_brujin: DeBrujinIndices
   ) -> bool:
-    if isinstance(x.typ, FreeTypeVar):
-      return isinstance(y.typ, FreeTypeVar) and x.typ == y.typ
-    if isinstance(x.typ, BoundTypeVar):
-      if not isinstance(y.typ, BoundTypeVar):
+    match x.typ:
+      case FreeTypeVar():
+        return isinstance(y.typ, FreeTypeVar) and x.typ == y.typ
+      case BoundTypeVar():
+        if not isinstance(y.typ, BoundTypeVar):
+          return False
+        xt = x.Type()
+        yt = y.Type()
+        if xt in de_brujin and yt in de_brujin:
+          return de_brujin[xt] == de_brujin[yt]
+        if xt not in de_brujin and yt not in de_brujin:
+          return xt == yt
         return False
-      xt = x.Type()
-      yt = y.Type()
-      if xt in de_brujin and yt in de_brujin:
-        return de_brujin[xt] == de_brujin[yt]
-      if xt not in de_brujin and yt not in de_brujin:
-        return xt == yt
-      return False
-    if isinstance(x.typ, Arrow):
-      return (
-          isinstance(y.typ, Arrow)
-          and _Helper(x.typ.arg, y.typ.arg, de_brujin)
-          and _Helper(x.typ.ret, y.typ.ret, de_brujin)
-      )
-    if isinstance(x.typ, PiType):
-      if not isinstance(y.typ, PiType):
-        return False
-      xt = x.typ.arg
-      yt = y.typ.arg
-      new_de_brujin = de_brujin.copy()
-      new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
-      return _Helper(x.typ.body, y.typ.body, new_de_brujin)
-    raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
+      case Arrow():
+        return (
+            isinstance(y.typ, Arrow)
+            and _Helper(x.typ.arg, y.typ.arg, de_brujin)
+            and _Helper(x.typ.ret, y.typ.ret, de_brujin)
+        )
+      case PiType():
+        if not isinstance(y.typ, PiType):
+          return False
+        xt = x.typ.arg
+        yt = y.typ.arg
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
+        return _Helper(x.typ.body, y.typ.body, new_de_brujin)
+      case _:
+        raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
   return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 

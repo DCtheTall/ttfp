@@ -586,9 +586,9 @@ Bool: Πα:*.(α -> α -> α)
 True: (λα:*.λx:α.λy:α.x):Bool
 False: (λα:*.λx:α.λy:α.y):Bool
 Neg: (λu:Bool.λβ:*.λp:β.λq:β.(u β q p)):(Bool -> Bool)
-(Neg True): (Neg True):Bool
+(Neg True):Bool
     ->> False
-(Neg False): (Neg False):Bool
+(Neg False):Bool
     ->> True
 
 Exercise 3.15
