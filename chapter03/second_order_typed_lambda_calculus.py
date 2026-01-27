@@ -539,7 +539,7 @@ class Apply(Term):
     return fn
 
 
-class TApply(Apply):
+class ApplyT(Apply):
   def __init__(
       self, fn: Term, arg: Type,
       # In case `arg` is a binding type variable in `fn`'s Π-type.
@@ -547,7 +547,7 @@ class TApply(Apply):
   ):
     fn_type = fn.Type()
     if not isinstance(fn_type, PiType):
-      raise TypeError(f'TApply must be used on Π-types, got {fn_type}')
+      raise TypeError(f'ApplyT must be used on Π-types, got {fn_type}')
     self.fn = fn
     assert not isinstance(arg, PiType)
     self.arg = arg
@@ -590,7 +590,7 @@ class Abstract(Term):
         and not isinstance(body.Type(), Arrow)
     ):
       body_str = ':'.join(body_str.split(':')[:-1])
-    if isinstance(body, TAbstract):
+    if isinstance(body, AbstractT):
       body_str = 'Π'.join(body_str.split('Π')[:-1])
     return f'(λ{args}.{body_str}):{self.typ}'
 
@@ -603,7 +603,7 @@ class Abstract(Term):
     return args_str + f'.λ{body.arg}'
 
 
-class TAbstract(Abstract):
+class AbstractT(Abstract):
   def __init__(self, arg: Union[TypeVar, BindingTypeVar], body: Term):
     self.arg = arg
     self.body = body
@@ -612,7 +612,7 @@ class TAbstract(Abstract):
     self.typ = PiType(arg, body.typ)
 
   def _AppendMultiArgStr(self, args_str, body):
-    if isinstance(body, TAbstract) and args_str[-2:] == ':*':
+    if isinstance(body, AbstractT) and args_str[-2:] == ':*':
       args_str = args_str[:-2]
       return args_str + f',{body.arg}'
     return args_str + f'.λ{body.arg}'
@@ -633,18 +633,18 @@ class Expression(Term):
         self.term = u
       case BoundVar():
         self.term = u
-      case TApply():
-        self.term = TApply(
+      case ApplyT():
+        self.term = ApplyT(
             Expression(u.fn), ExpressionType(u.arg), u.new_types,
         )
       case Apply():
         self.term = Apply(Expression(u.fn), Expression(u.arg))
-      case TAbstract():
+      case AbstractT():
         arg_t = u.arg
         if not isinstance(arg_t, BindingTypeVar):
           arg_t = BindingTypeVar(arg_t)
         body = Expression(u.body)
-        self.term = TAbstract(arg_t, body)
+        self.term = AbstractT(arg_t, body)
       case Abstract():
         v = u.arg
         if not isinstance(v, BindingVar):
@@ -686,12 +686,12 @@ class Expression(Term):
           self.term = BoundVar(bv, self.term)
       case BoundVar():
         pass
-      case TApply():
+      case ApplyT():
         self.term.fn.MaybeBindFreeVarsTo(bv)
       case Apply():
         self.term.fn.MaybeBindFreeVarsTo(bv)
         self.term.arg.MaybeBindFreeVarsTo(bv)
-      case TAbstract() | Abstract():
+      case AbstractT() | Abstract():
         self.term.body.MaybeBindFreeVarsTo(bv)
       case _:
         raise NotImplementedError(f'Unexpected member of Expression {self.term}')
@@ -709,7 +709,7 @@ class Expression(Term):
       case Apply():
         self.term.fn.MaybeBindFreeTypesTo(btv)
         self.term.arg.MaybeBindFreeTypesTo(btv)
-      case TAbstract():
+      case AbstractT():
         self.term.body.MaybeBindFreeTypesTo(btv)
       case Abstract():
         self.term.arg.typ.MaybeBindFreeTypesTo(btv)
@@ -722,13 +722,13 @@ class Expression(Term):
     match self.term:
       case FreeVar() | BoundVar():
         return Expression(self.term.var)
-      case TApply():
-        return Expression(TApply(self.term.fn.Copy(), self.term.arg.typ))
+      case ApplyT():
+        return Expression(ApplyT(self.term.fn.Copy(), self.term.arg.typ))
       case Apply():
         return Expression(Apply(self.term.fn.Copy(), self.term.arg.Copy()))
-      case TAbstract():
+      case AbstractT():
         bt = self.term.arg
-        return Expression(TAbstract(bt.typ, self.term.body.Copy()))
+        return Expression(AbstractT(bt.typ, self.term.body.Copy()))
       case Abstract():
         bv = self.term.arg
         return Expression(Abstract(bv.var, self.term.body.Copy()))
@@ -751,9 +751,9 @@ class Expression(Term):
         if isinstance(self.term, FreeVar):
           return Expression(FreeVar(u))
         return Expression(BoundVar(binder_map[self.term.bv], FreeVar(u)))
-      case TApply():
+      case ApplyT():
         return Expression(
-            TApply(
+            ApplyT(
                 self.term.fn.ReplaceType(btv, T, new_types, binder_map),
                 SubstituteType(
                     self.term.arg, btv, ExpressionType(T), new_types, btv
@@ -767,9 +767,9 @@ class Expression(Term):
                 self.term.arg.ReplaceType(btv, T, new_types, binder_map)
             )
         )
-      case TAbstract():
+      case AbstractT():
         return Expression(
-            TAbstract(
+            AbstractT(
                 self.term.arg.typ,
                 self.term.body.ReplaceType(btv, T, new_types, binder_map)
             )
@@ -804,7 +804,7 @@ class FreeVars(Multiset[Var]):
         self.elems = [e.term.var]
       case BoundVar():
         self.elems = []
-      case TApply():
+      case ApplyT():
         self.elems = FreeVars(e.term.fn).elems
       case Apply():
         self.elems = FreeVars(e.term.fn).elems + FreeVars(e.term.arg).elems
@@ -834,8 +834,8 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         if xu not in de_brujin and yu not in de_brujin:
           return xu == yu
         return False
-      case TApply():
-        if not isinstance(y.term, TApply):
+      case ApplyT():
+        if not isinstance(y.term, ApplyT):
           return False
         if not _Helper(x.term.fn, y.term.fn, de_brujin):
           return False
@@ -843,12 +843,12 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
       case Apply():
         return (
             isinstance(y.term, Apply)
-            and not isinstance(y.term, TApply)
+            and not isinstance(y.term, ApplyT)
             and _Helper(x.term.fn, y.term.fn, de_brujin)
             and _Helper(x.term.arg, y.term.arg, de_brujin)
         )
-      case TAbstract():
-        if not isinstance(y.term, TAbstract):
+      case AbstractT():
+        if not isinstance(y.term, AbstractT):
           return False
         xt = x.Type().arg
         yt = y.Type().arg
@@ -856,7 +856,7 @@ def AlphaEquiv(x: Expression, y: Expression) -> bool:
         new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
         return _Helper(x.term.body, y.term.body, new_de_brujin)
       case Abstract():
-        if not isinstance(y.term, Abstract) or isinstance(y.term, TAbstract):
+        if not isinstance(y.term, Abstract) or isinstance(y.term, AbstractT):
           return False
         xu = x.term.arg
         yu = y.term.arg
@@ -880,11 +880,11 @@ def RenameTerm(M: Expression, x: Var, y: Var) -> Expression:
         raise Exception('Should not store BindingVar in Expression')
       case FreeVar() | BoundVar():
         return False
-      case TApply():
+      case ApplyT():
         return _HasBindingVar(M.term.fn, y)
       case Apply():
         return _HasBindingVar(M.term.fn, y) or _HasBindingVar(M.term.arg, y)
-      case TAbstract():
+      case AbstractT():
         return _HasBindingVar(M.term.body, y)
       case Abstract():
         bv = M.term.arg
@@ -905,9 +905,9 @@ def RenameTerm(M: Expression, x: Var, y: Var) -> Expression:
         if M.term.bv == x:
           return BoundVar(y, FreeVar(y.var))
         return M
-      case TApply():
+      case ApplyT():
         return Expression(
-            TApply(_RenameBoundVars(M.term.fn, x, y), M.term.arg)
+            ApplyT(_RenameBoundVars(M.term.fn, x, y), M.term.arg)
         )
       case Apply():
         return Expression(
@@ -916,9 +916,9 @@ def RenameTerm(M: Expression, x: Var, y: Var) -> Expression:
                 _RenameBoundVars(M.term.arg, x, y)
             )
         )
-      case TAbstract():
+      case AbstractT():
         body = _RenameBoundVars(M.term.body, x, y)
-        return Expression(TAbstract(M.term.arg, body))
+        return Expression(AbstractT(M.term.arg, body))
       case Abstract():
         body = _RenameBoundVars(M.term.body, x, y)
         return Expression(Abstract(M.term.arg, body))
@@ -932,14 +932,14 @@ def RenameTerm(M: Expression, x: Var, y: Var) -> Expression:
       return Expression(M.term.var)
     case BoundVar():
       return M
-    case TApply():
-      return Expression(TApply(RenameTerm(M.term.fn, x, y), M.term.arg))
+    case ApplyT():
+      return Expression(ApplyT(RenameTerm(M.term.fn, x, y), M.term.arg))
     case Apply():
       return Expression(
           Apply(RenameTerm(M.term.fn, x, y), RenameTerm(M.term.arg, x, y))
       )
-    case TAbstract():
-      return Expression(TAbstract(M.term.arg, RenameTerm(M.term.body, x, y)))
+    case AbstractT():
+      return Expression(AbstractT(M.term.arg, RenameTerm(M.term.body, x, y)))
     case Abstract():
       if FreeVars(M.term.body).Contains(y):
         raise RenameFreeVarError(f'{y} in FV({M.term})')
@@ -970,9 +970,9 @@ def SubstituteTerm(
       if binding is not None and M.term.BoundTo(binding):
         return N
       return M
-    case TApply():
+    case ApplyT():
       return Expression(
-          TApply(SubstituteTerm(M.term.fn, x, N, zs, binding), M.term.arg)
+          ApplyT(SubstituteTerm(M.term.fn, x, N, zs, binding), M.term.arg)
       )
     case Apply():
       return Expression(
@@ -981,9 +981,9 @@ def SubstituteTerm(
               SubstituteTerm(M.term.arg, x, N, zs, binding)
           )
       )
-    case TAbstract():
+    case AbstractT():
       return Expression(
-          TAbstract(M.term.arg, SubstituteTerm(M.term.body, x, N, zs, binding))
+          AbstractT(M.term.arg, SubstituteTerm(M.term.body, x, N, zs, binding))
       )
     case Abstract():
       if FreeVars(N).ContainsBindingVar(M.term.arg):
@@ -1006,9 +1006,9 @@ class Redexes(Multiset[Term]):
     match M.term:
       case Occurrence():
         self.elems = []
-      case TApply():
+      case ApplyT():
         self.elems = []
-        if isinstance(M.term.FuncTerm(), TAbstract):
+        if isinstance(M.term.FuncTerm(), AbstractT):
           self.elems.append(M.term)
         self.elems.extend(Redexes(M.term.fn).elems)
       case Apply():
@@ -1017,7 +1017,7 @@ class Redexes(Multiset[Term]):
           self.elems.append(M.term)
         self.elems.extend(Redexes(M.term.fn).elems)
         self.elems.extend(Redexes(M.term.arg).elems)
-      case TAbstract():
+      case AbstractT():
         self.elems = Redexes(M.term.body).elems
       case Abstract():
         self.elems = Redexes(M.term.body).elems
@@ -1034,13 +1034,13 @@ def OneStepBetaReduce(
   match M.term:
     case Occurrence():
       return M
-    case TApply():
+    case ApplyT():
       fn, arg_t = M.term.fn, M.term.arg
-      if isinstance(fn.term, TAbstract):
+      if isinstance(fn.term, AbstractT):
         return fn.term.body.ReplaceType(fn.term.arg, arg_t, new_types)
       if not fn.BetaNormal():
         return Expression(
-            TApply(
+            ApplyT(
                 OneStepBetaReduce(fn, new_vars, new_types, applicative),
                 arg_t,
                 M.term.new_types
@@ -1077,7 +1077,7 @@ def OneStepBetaReduce(
       # Normal order: evaluate outermost-leftmost redex first.
       if (
           isinstance(M.term.FuncTerm(), Abstract)
-          and not isinstance(M.term.FuncTerm(), TAbstract)
+          and not isinstance(M.term.FuncTerm(), AbstractT)
       ):
         M, N = M.term.fn, M.term.arg
         return SubstituteTerm(
@@ -1096,9 +1096,9 @@ def OneStepBetaReduce(
               M.term.arg
           )
       )
-    case TAbstract():
+    case AbstractT():
       return Expression(
-          TAbstract(
+          AbstractT(
               M.term.arg,
               OneStepBetaReduce(M.term.body, new_vars, new_types, applicative)
           )
@@ -1401,7 +1401,7 @@ class Appl2Rule(DerivationRule):
     p_fn, p_arg = self.premisses
     fn = p_fn.stmt.subj
     arg = p_arg.stmt.subj
-    expr = Expression(TApply(fn, arg))
+    expr = Expression(ApplyT(fn, arg))
     return Judgement(p_fn.ctx, Statement(expr, expr.Type()))
 
 
@@ -1418,7 +1418,7 @@ class Abst2Rule(DerivationRule):
     a = self.arg
     body = p.stmt.subj
     if isinstance(body, Expression):
-      expr = Expression(TAbstract(a, body))
+      expr = Expression(AbstractT(a, body))
     else:
       assert isinstance(body, ExpressionType)
       expr = ExpressionType(PiType(a, body))
@@ -1586,13 +1586,13 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
         assert jdgmnt.ctx.ContainsVar(M.term.var)
       case BoundVar():
         pass
-      case TAbstract():
+      case AbstractT():
         term_vars.append(M.term.arg.typ)
         _FindVars(M.term.body)
       case Abstract():
         term_vars.append(M.term.arg.var)
         _FindVars(M.term.body)
-      case TApply():
+      case ApplyT():
         term_vars.append(M.term.arg.Type())
         _FindVars(M.term.fn)
       case Apply():
@@ -1616,12 +1616,12 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
         return d.VarRule(M.term.var)
       case BoundVar():
         raise ValueError(f'Should not need rule for bound variable {M.term}')
-      case TApply():
+      case ApplyT():
         arg_premiss = d.FormRule(M.term.arg)
         return d.Appl2Rule(_Helper(M.term.fn), arg_premiss)
       case Apply():
         return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
-      case TAbstract():
+      case AbstractT():
         return d.Abst2Rule(M.term.arg.typ, _Helper(Expression(M.term.body)))
       case Abstract():
         return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
@@ -1736,7 +1736,7 @@ def FindTerm(
             new_visited,
             new_vars
         )
-        return ctx, Expression(TAbstract(typ.Type().arg, body_term))
+        return ctx, Expression(AbstractT(typ.Type().arg, body_term))
       case Arrow():
         for u in new_vars:
           if typ.Type().arg == u.typ:
@@ -1774,7 +1774,7 @@ def FindTerm(
             if tv not in substitution_map:
               raise TermNotFoundError('Ambiguous type parameter')
             replacement = subst_map[tv]
-            cur_term = Expression(TApply(cur_term, replacement))
+            cur_term = Expression(ApplyT(cur_term, replacement))
           for need_arg_type in real_arg_types:
             ctx, arg_term = _Helper(ctx, need_arg_type, new_visited, new_vars)
             cur_term = Expression(Apply(cur_term, arg_term))

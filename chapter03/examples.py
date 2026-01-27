@@ -9,9 +9,11 @@ from second_order_typed_lambda_calculus import (
     Abst2Rule,
     AbstRule,
     Abstract,
+    AbstractT,
     Appl2Rule,
     ApplRule,
     Apply,
+    ApplyT,
     Arrow,
     Context,
     Derivation,
@@ -23,8 +25,6 @@ from second_order_typed_lambda_calculus import (
     PiType,
     Statement,
     SubstituteType,
-    TAbstract,
-    TApply,
     TypeVar,
     Var,
     VarRule,
@@ -45,9 +45,9 @@ def RunExamples():
   x = Var('x', alpha)
   y = Var('y', beta)
   print('Polymorphic identity:')
-  M = Expression(TAbstract(alpha, Abstract(x, x)))
+  M = Expression(AbstractT(alpha, Abstract(x, x)))
   print(M)
-  N = Expression(TAbstract(beta, Abstract(y, y)))
+  N = Expression(AbstractT(beta, Abstract(y, y)))
   print(f'{M} =α {N}:', M == N)
   print(f'{M.typ} =α {N.typ}:', M.typ == N.typ)
 
@@ -58,11 +58,11 @@ def RunExamples():
   print('Type abstraction')
   M = Expression(Abstract(x, x))
   print('M:', M)
-  print(f'λ{alpha}:*.M:', Expression(TAbstract(alpha, M)))
+  print(f'λ{alpha}:*.M:', Expression(AbstractT(alpha, M)))
   print('Type application')
-  M = Expression(TAbstract(alpha, Abstract(x, x)))
+  M = Expression(AbstractT(alpha, Abstract(x, x)))
   print('Polymorphic identity:', M)
-  N = Expression(TApply(M, beta))
+  N = Expression(ApplyT(M, beta))
   print(f'Applied to {beta}:', N)
   print(
       f'{N.typ} =α {M.Type().body}[{alpha} := {beta}]:',
@@ -74,7 +74,7 @@ def RunExamples():
           M.Type().arg,
       )
   )
-  N = Expression(TApply(M, gamma))
+  N = Expression(ApplyT(M, gamma))
   print(f'Applied to {gamma}:', N)
   z = Var('z', gamma)
   print('Applied to term:', Expression(Apply(N, z)))
@@ -126,7 +126,7 @@ def RunExamples():
   print(rule.Conclusion())
   print('Appl2 rule:')
   x = Var('x', alpha)
-  M = Expression(TAbstract(alpha, Abstract(x, x)))
+  M = Expression(AbstractT(alpha, Abstract(x, x)))
   ctx = Context(beta)
   premiss1 = Judgement(ctx, Statement(M, M.Type()))
   premiss2 = Judgement(ctx, Statement(ExpressionType(beta), beta))
@@ -165,7 +165,7 @@ def RunExamples():
   M = vii.stmt.subj
   print('Start with term:')
   print(M)
-  M = Expression(TApply(M, nat))
+  M = Expression(ApplyT(M, nat))
   print('Apply type nat:')
   print(M)
   M = Expression(Apply(M, succ))

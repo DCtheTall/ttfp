@@ -40,11 +40,11 @@ def RunExercises():
   g = Var('g', Arrow(beta, gamma))
   x = Var('x', alpha)
   M = Expression(
-      TAbstract(
+      AbstractT(
           alpha,
-          TAbstract(
+          AbstractT(
               beta,
-              TAbstract(
+              AbstractT(
                   gamma,
                   Abstract(f, Abstract(g, Abstract(x, Apply(g, Apply(f, x)))))
               )
@@ -63,13 +63,13 @@ def RunExercises():
   even = Var('even', Arrow(nat, boolT))
   print('(M nat nat bool suc even):')
   print('Apply nat:')
-  M = Expression(TApply(M, nat))
+  M = Expression(ApplyT(M, nat))
   print(M)
   print('Apply nat:')
-  M = Expression(TApply(M, nat))
+  M = Expression(ApplyT(M, nat))
   print(M)
   print('Apply bool:')
-  M = Expression(TApply(M, boolT))
+  M = Expression(ApplyT(M, boolT))
   print(M)
   print('Apply suc:')
   M = Expression(Apply(M, suc))
@@ -97,9 +97,9 @@ def RunExercises():
   g = Var('g', Arrow(alpha, beta))
   x = Var('x', alpha)
   M = Expression(
-      TAbstract(
+      AbstractT(
           alpha,
-          TAbstract(
+          AbstractT(
               beta,
               Abstract(
                   f,
@@ -108,7 +108,7 @@ def RunExercises():
           )
       )
   )
-  M = Expression(TApply(TApply(M, nat), boolT))
+  M = Expression(ApplyT(ApplyT(M, nat), boolT))
   print('Derive:')
   print(M)
   deriv = DeriveTerm(Judgement(Context(), Statement(M, M.Type())))
@@ -129,22 +129,22 @@ def RunExercises():
   print(deriv.FlagFormat())
 
   print('Exercise 3.5b')
-  M = Expression(TApply(x, beta))
+  M = Expression(ApplyT(x, beta))
   deriv = DeriveTerm(Judgement(ctx, Statement(M, beta)))
   print(deriv.FlagFormat())
 
   print('Exercise 3.5c')
   u = Var('u', beta)
-  M = Expression(Abstract(u, TApply(x, beta)))
+  M = Expression(Abstract(u, ApplyT(x, beta)))
   print(M)
   deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
   print(deriv.FlagFormat())
-  M = Expression(TApply(x, Arrow(beta, beta)))
+  M = Expression(ApplyT(x, Arrow(beta, beta)))
   print(M)
   deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
   print(deriv.FlagFormat())
   M = Expression(
-      Apply(TApply(x, Arrow(beta, Arrow(beta, beta))), TApply(x, beta))
+      Apply(ApplyT(x, Arrow(beta, Arrow(beta, beta))), ApplyT(x, beta))
   )
   print(M)
   deriv = DeriveTerm(Judgement(ctx, Statement(M, Arrow(beta, beta))))
@@ -153,12 +153,12 @@ def RunExercises():
   print('Exercise 3.5d')
   f = Var('f', Arrow(beta, Arrow(beta, beta)))
   M = Expression(
-      Abstract(f, Apply(Apply(f, TApply(x, beta)), TApply(x, beta)))
+      Abstract(f, Apply(Apply(f, ApplyT(x, beta)), ApplyT(x, beta)))
   )
   print(M)
   t1 = M.Type()
   print('type1:', t1)
-  N = Expression(TApply(x, Arrow(Arrow(beta, Arrow(beta, beta)), beta)))
+  N = Expression(ApplyT(x, Arrow(Arrow(beta, Arrow(beta, beta)), beta)))
   print(N)
   t2 = N.Type()
   print('type2:', t2)
@@ -246,7 +246,7 @@ def RunExercises():
   deriv = DeriveTerm(Judgement(ctx, Statement(M, alpha)))
   print(deriv.FlagFormat())
   print(f'Term with type {beta}:')
-  N = Expression(TApply(Apply(x, M), beta))
+  N = Expression(ApplyT(Apply(x, M), beta))
   print(N)
   deriv = DeriveTerm(Judgement(ctx, Statement(N, beta)))
   print(deriv.FlagFormat())
@@ -267,7 +267,7 @@ def RunExercises():
   )
   print('T2:', T2)
   M = Expression(
-      TAbstract(alpha, Abstract(x, TAbstract(beta, Abstract(y, x))))
+      AbstractT(alpha, Abstract(x, AbstractT(beta, Abstract(y, x))))
   )
   print(M)
   deriv = DeriveTerm(Judgement(Context(), Statement(M, T2.Type())))
@@ -279,11 +279,11 @@ def RunExercises():
   y = Var('y', Arrow(alpha, beta))
   z = Var('z', alpha)
   S = Expression(
-      TAbstract(
+      AbstractT(
           alpha,
-          TAbstract(
+          AbstractT(
               beta,
-              TAbstract(
+              AbstractT(
                   gamma,
                   Abstract(
                       x,
@@ -299,7 +299,7 @@ def RunExercises():
   print('\nExercise 3.10a')
   x = Var('x', PiType(alpha, Arrow(alpha, alpha)))
   M = Expression(
-      Abstract(x, Apply(TApply(x, Arrow(sigma, sigma)), TApply(x, sigma)))
+      Abstract(x, Apply(ApplyT(x, Arrow(sigma, sigma)), ApplyT(x, sigma)))
   )
   print('M:', M)
   deriv = DeriveTerm(Judgement(Context(sigma), Statement(M, M.Type())))
@@ -307,7 +307,7 @@ def RunExercises():
 
   print('Exercise 3.10b')
   y = Var('y', alpha)
-  N = Expression(TAbstract(alpha, Abstract(y, y)))
+  N = Expression(AbstractT(alpha, Abstract(y, y)))
   print('N:', N)
   applied = Expression(Apply(M, N))
   print('(M N):', applied)
@@ -325,12 +325,12 @@ def RunExercises():
           x,
           Apply(
             Apply(
-                TApply(x, Arrow(contradict, Arrow(contradict, contradict))),
-                Apply(TApply(x, Arrow(contradict, contradict)), x)
+                ApplyT(x, Arrow(contradict, Arrow(contradict, contradict))),
+                Apply(ApplyT(x, Arrow(contradict, contradict)), x)
             ),
             Apply(
                 Apply(
-                    TApply(
+                    ApplyT(
                         x, Arrow(contradict, Arrow(contradict, contradict))
                     ),
                     x
@@ -354,14 +354,14 @@ def RunExercises():
   Nat.AliasType('Nat')
   f = Var('f', Arrow(alpha, alpha))
   x = Var('x', alpha)
-  Zero = Expression(TAbstract(alpha, Abstract(f, Abstract(x, x))))
+  Zero = Expression(AbstractT(alpha, Abstract(f, Abstract(x, x))))
   print('Zero:', Zero)
   Zero.AliasTerm('Zero')
-  One = Expression(TAbstract(alpha, Abstract(f, Abstract(x, Apply(f, x)))))
+  One = Expression(AbstractT(alpha, Abstract(f, Abstract(x, Apply(f, x)))))
   print('One:', One)
   One.AliasTerm('One')
   Two = Expression(
-      TAbstract(alpha, Abstract(f, Abstract(x, Apply(f, Apply(f, x)))))
+      AbstractT(alpha, Abstract(f, Abstract(x, Apply(f, Apply(f, x)))))
   )
   print('Two:', Two)
   Two.AliasTerm('Two')
@@ -371,12 +371,12 @@ def RunExercises():
   Suc = Expression(
       Abstract(
           n,
-          TAbstract(
+          AbstractT(
               beta,
               Abstract(
                   fb,
                   Abstract(
-                      xb, Apply(fb, Apply(Apply(TApply(n, beta), fb), xb))
+                      xb, Apply(fb, Apply(Apply(ApplyT(n, beta), fb), xb))
                   )
               )
           )
@@ -401,15 +401,15 @@ def RunExercises():
           m,
           Abstract(
               n,
-              TAbstract(
+              AbstractT(
                   alpha,
                   Abstract(
                       f,
                       Abstract(
                           x,
                           Apply(
-                              Apply(TApply(m, alpha), f),
-                              Apply(Apply(TApply(n, alpha), f), x)
+                              Apply(ApplyT(m, alpha), f),
+                              Apply(Apply(ApplyT(n, alpha), f), x)
                           )
                       )
                   )
@@ -434,7 +434,7 @@ def RunExercises():
           m,
           Abstract(
               n,
-              TAbstract(
+              AbstractT(
                   alpha,
                   Abstract(
                       f,
@@ -442,7 +442,7 @@ def RunExercises():
                           x,
                           Apply(
                               Apply(
-                                  TApply(m, alpha), Apply(TApply(n, alpha), f)
+                                  ApplyT(m, alpha), Apply(ApplyT(n, alpha), f)
                               ),
                               x
                           )
@@ -482,10 +482,10 @@ def RunExercises():
   Bool.AliasType('Bool')
   x = Var('x', alpha)
   y = Var('y', alpha)
-  Tru = Expression(TAbstract(alpha, Abstract(x, Abstract(y, x))))
+  Tru = Expression(AbstractT(alpha, Abstract(x, Abstract(y, x))))
   print('True:', Tru)
   Tru.AliasTerm('True')
-  Fls = Expression(TAbstract(alpha, Abstract(x, Abstract(y, y))))
+  Fls = Expression(AbstractT(alpha, Abstract(x, Abstract(y, y))))
   print('False:', Fls)
   Fls.AliasTerm('False')
   u = Var('u', Bool)
@@ -494,9 +494,9 @@ def RunExercises():
   Neg = Expression(
       Abstract(
           u,
-          TAbstract(
+          AbstractT(
               beta,
-              Abstract(p, Abstract(q, Apply(Apply(TApply(u, beta), q), p)))
+              Abstract(p, Abstract(q, Apply(Apply(ApplyT(u, beta), q), p)))
           )
       )
   )
@@ -519,7 +519,7 @@ def RunExercises():
           u,
           Abstract(
               v,
-              TAbstract(
+              AbstractT(
                   beta,
                   Abstract(
                       p,
@@ -527,10 +527,10 @@ def RunExercises():
                           q,
                           Apply(
                               Apply(
-                                  TApply(u, beta),
-                                  Apply(Apply(TApply(v, beta), p), q)
+                                  ApplyT(u, beta),
+                                  Apply(Apply(ApplyT(v, beta), p), q)
                               ),
-                              Apply(Apply(TApply(v, beta), q), q)
+                              Apply(Apply(ApplyT(v, beta), q), q)
                           )
                       )
                   )
@@ -566,7 +566,7 @@ def RunExercises():
           u,
           Abstract(
               v,
-              TAbstract(
+              AbstractT(
                   beta,
                   Abstract(
                       p,
@@ -574,10 +574,10 @@ def RunExercises():
                           q,
                           Apply(
                               Apply(
-                                  TApply(u, beta),
-                                  Apply(Apply(TApply(v, beta), p), p)
+                                  ApplyT(u, beta),
+                                  Apply(Apply(ApplyT(v, beta), p), p)
                               ),
-                              Apply(Apply(TApply(v, beta), p), q)
+                              Apply(Apply(ApplyT(v, beta), p), q)
                           )
                       )
                   )
@@ -608,7 +608,7 @@ def RunExercises():
           u,
           Abstract(
               v,
-              TAbstract(
+              AbstractT(
                   beta,
                   Abstract(
                       p,
@@ -616,10 +616,10 @@ def RunExercises():
                           q,
                           Apply(
                               Apply(
-                                  TApply(u, beta),
-                                  Apply(Apply(TApply(v, beta), q), p)
+                                  ApplyT(u, beta),
+                                  Apply(Apply(ApplyT(v, beta), q), p)
                               ),
-                              Apply(Apply(TApply(v, beta), p), q)
+                              Apply(Apply(ApplyT(v, beta), p), q)
                           )
                       )
                   )
@@ -650,7 +650,7 @@ def RunExercises():
           u,
           Abstract(
               v,
-              TAbstract(
+              AbstractT(
                   beta,
                   Abstract(
                       p,
@@ -658,10 +658,10 @@ def RunExercises():
                           q,
                           Apply(
                               Apply(
-                                  TApply(u, beta),
-                                  Apply(Apply(TApply(v, beta), p), q)
+                                  ApplyT(u, beta),
+                                  Apply(Apply(ApplyT(v, beta), p), q)
                               ),
-                              Apply(Apply(TApply(v, beta), p), p)
+                              Apply(Apply(ApplyT(v, beta), p), p)
                           )
                       )
                   )
@@ -701,12 +701,12 @@ def RunExercises():
   IsZero = Expression(
       Abstract(
           n,
-          TAbstract(
+          AbstractT(
               gamma,
               Abstract(
                   u,
                   Abstract(
-                      v, Apply(Apply(TApply(n, gamma), Abstract(w, v)), u)
+                      v, Apply(Apply(ApplyT(n, gamma), Abstract(w, v)), u)
                   )
               )
           )
@@ -747,7 +747,7 @@ def RunExercises():
   v = Var('v', Arrow(Bool, Arrow(alpha, Arrow(alpha, alpha))))
   def BuildTree(M: Expression):
     assert M.Type() == alpha
-    return Expression(TAbstract(alpha, Abstract(u, Abstract(v, M))))
+    return Expression(AbstractT(alpha, Abstract(u, Abstract(v, M))))
   print('M = (u False):')
   print(BuildTree(Expression(Apply(u, Fls))))
   print('M = (v True (u False) (u True)):')
@@ -781,7 +781,7 @@ def RunExercises():
               s,
               Abstract(
                   t,
-                  TAbstract(
+                  AbstractT(
                       gamma,
                       Abstract(
                           ug,
@@ -790,9 +790,9 @@ def RunExercises():
                               Apply(
                                   Apply(
                                       Apply(vg, p),
-                                      Apply(Apply(TApply(s, gamma), ug), vg)
+                                      Apply(Apply(ApplyT(s, gamma), ug), vg)
                                   ),
-                                  Apply(Apply(TApply(t, gamma), ug), vg)
+                                  Apply(Apply(ApplyT(t, gamma), ug), vg)
                               )
                           )
                       )
