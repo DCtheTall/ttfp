@@ -251,8 +251,8 @@ class FreeTypeVars(Multiset[TypeVar]):
       case _:
         raise NotImplementedError(f'Unexpected input to OccursFree {T}')
 
-  def ContainsBindingVar(self, bv: BindingVar):
-    return self.Contains(bv.var)
+  def ContainsBindingVar(self, btv: BindingTypeVar):
+    return self.Contains(btv.typ)
 
 
 def RenameType(
@@ -1186,16 +1186,15 @@ class Context:
     self.typ_declarations = []
     self.declarations = []  # To preserve order for printing only
     for u in vars:
+      self.declarations.append(u)
       match u:
         case Var():
           for tv in FreeTypeVars(ExpressionType(u.typ)):
             if not self.ContainsVar(tv.typ):
               raise ValueError(f'Context {self} does not contain free types in {u}')
           self.var_declarations.append(Declaration(u))
-          self.declarations.append(self.var_declarations[-1])
         case TypeVar():
           self.typ_declarations.append(TypeDeclaration(u))
-          self.declarations.append(self.typ_declarations[-1])
         case _:
           raise NotImplementedError(f'Unexpected input to Context {u}')
 

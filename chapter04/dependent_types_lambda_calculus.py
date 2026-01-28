@@ -12,9 +12,17 @@ class Kind:
     raise NotImplementedError('Do not cast Kind subclass to str')
 
 
+class AllKinds:
+  def __str__(self):
+    return '□'
+
+  def __eq__(self, other):
+    return isinstance(other, AllKinds)
+
+
 class Star(Kind):
   def __str__(self):
-    return '*'
+    return '*:' + str(AllKinds())
 
   def __eq__(self, other):
     return isinstance(other, Star)
@@ -29,21 +37,13 @@ class KArrow(Kind):
     ret_str = str(self.ret)
     if isinstance(self.ret, KArrow):
       ret_str = ret_str[1:-1]
-    return f'({self.arg} -> {ret_str})'
+    return f'({str(self.arg)[:-2]} -> {str(ret_str)[:-2]}):{AllKinds()}'
 
   def __eq__(self, other):
     assert isinstance(other, Kind)
     if not isinstance(other, KArrow):
       return False
     return (self.arg, self.ret) == (other.arg, other.ret)
-
-
-class AllKinds:
-  def __str__(self):
-    return '□'
-
-  def __eq__(self, other):
-    return isinstance(other, AllKinds)
 
 
 class Type:
@@ -72,7 +72,7 @@ class TypeVar(Type):
     self.kind = kind
 
   def __str__(self):
-    return f'{self.name}:{self.kind}'
+    return f'{self.name}:{self.kind}'[:-2]
 
   def __eq__(self, other):
     if isinstance(other, TOccurrence):
@@ -158,7 +158,7 @@ class TAbstract(Type):
     while isinstance(body, TAbstract):
       args = body._AppendMultiArgStr(args, body)
       body = body.body_key
-    return f'(λ{args}.{body}):{self.kind}'
+    return f'(λ{args}.{body}):{self.kind}'[:-2]
 
   def _AppendMultiArgStr(self, args_str, body):
     return args_str + f'.λ{body.arg}'
@@ -180,7 +180,7 @@ class TApply(Type):
     if isinstance(fn, TApply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
     arg = str(self.arg)
-    return f'({fn_str} {arg}):{self.kind}'
+    return f'({fn_str} {arg}):{self.kind}'[:-2]
 
 
 class TypeExpression(Type):
@@ -242,7 +242,9 @@ class TypeExpression(Type):
       case TAbstract():
         self.typ.body.MaybeBindFreeTypesTo(btv)
       case _:
-        raise NotImplementedError(f'Unexpected member of TypeExpression {self.typ}')
+        raise NotImplementedError(
+            f'Unexpected member of TypeExpression {self.typ}'
+        )
   
   def Copy(self) -> 'TypeExpression':
     match self.typ:
@@ -260,3 +262,560 @@ class TypeExpression(Type):
             f'Unexpected member of TypeExpression {self.typ}'
         )
 
+
+class Multiset[T]:
+  elems: list[T]
+
+  def Contains(self, x: T) -> bool:
+    return x in self.elems
+
+  def __init__(self, xs: Sequence[T]):
+    self.elems = list(xs)
+
+  def __str__(self):
+    if len(self) == 0:
+      return 'Ø'
+    elems = ', '.join([str(x) for x in self])
+    return f'[{elems}]'
+
+  def __iter__(self):
+    for el in self.elems:
+      yield el
+
+  def __len__(self):
+    return len(self.elems)
+
+
+class FreeTypeVars(Multiset[TypeVar]):
+  def __init__(self, T: TypeExpression):
+    match T.typ:
+      case FreeTypeVar():
+        self.elems = [T.typ]
+      case TOccurrence():
+        self.elems = []
+      case Arrow():
+        self.elems = FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+      case TApply():
+        self.elems = FreeTypeVars(T.typ.body).elems
+      case _:
+        raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+
+  def ContainsBindingVar(self, btv: BindingTypeVar):
+    return self.Contains(btv.typ)
+
+
+class Term:
+  typ: Type
+
+  def __str__(self):
+    raise NotImplementedError('Not implemented')
+
+  def Type(self):
+    typ = self.typ
+    if isinstance(typ, TypeExpression):
+      typ = typ.typ
+    if isinstance(typ, TOccurrence):
+      typ = typ.typ
+    assert (
+      isinstance(typ, TypeVar)
+      or isinstance(typ, TArrow)
+    )
+    return typ
+
+
+class Var(Term):
+  def __init__(self, name: str, typ: Type):
+    self.name = name
+    self.typ = typ
+
+  def __str__(self):
+    line = f'{self.name}:{self.typ}'
+    kind_str = str(self.typ.kind)
+    return line[:len(kind_str)]
+
+  def __hash__(self):
+    return hash(str(self))
+
+  def __eq__(self, other):
+    if isinstance(other, Occurrence):
+      other = other.var
+    assert isinstance(other, Var)
+    return self.name == other.name and self.Type() == other.Type()
+
+
+class Occurrence:
+  def __init__(self, u: Var):
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = u.typ
+
+  def __str__(self):
+    return str(self.var)
+
+  def __eq__(self, other):
+    if isinstance(other, Occurrence):
+      return self.var == other.var
+    if isinstance(other, Var):
+      return self.var == other
+    raise Exception(f'Unexpected RHS {other}')
+
+
+class FreeVar(Occurrence):
+  pass
+
+
+class BindingVar(Occurrence):
+  def __eq__(self, other):
+    return id(self) == id(other)
+
+  def __init__(self, u: Var):
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = TypeExpression(u.typ)
+
+  def __hash__(self):
+    return id(self)
+
+  def ShouldBind(self, fv: FreeVar) -> bool:
+    return self.var == fv
+
+
+class BoundVar(Occurrence):
+  def __init__(self, bv: BindingVar, fv: FreeVar):
+    self.bv = bv
+    self.var = fv.var
+    bv_typ = self.bv.typ
+    if isinstance(bv_typ, TypeExpression):
+      bv_typ = bv_typ.Type()
+    if bv_typ != self.var.Type():
+      raise TypeError(
+          f'Cannot bind variable with type {bv_typ} '
+          f'to variable with type {self.var.typ}'
+      )
+    self.typ = fv.typ
+
+  def __str__(self):
+    # Bound variables omit types.
+    return str(self.var).split(':')[0]
+
+  def BoundTo(self, bv: BindingVar) -> bool:
+    return self.bv == bv
+
+
+class FreeVars(Multiset[Var]):
+  def __init__(self, e: Expression):
+    match e.term:
+      case FreeVar():
+        self.elems = [e.term.var]
+      case BoundVar():
+        self.elems = []
+      case Apply():
+        self.elems = FreeVars(e.term.fn).elems + FreeVars(e.term.arg).elems
+      case Abstract():
+        self.elems = FreeVars(e.term.body).elems
+      case _:
+        raise NotImplementedError(f'Unexpected member of Expression {e.term}')
+
+  def ContainsBindingVar(self, bv: BindingVar):
+    return self.Contains(bv.var)
+
+
+class Apply(Term):
+  def __init__(self, fn: Term, arg: Term):
+    self.fn = fn
+    self.arg = arg
+    if not isinstance(fn.Type(), Arrow):
+      raise TypeError(f'Left term of Apply must be Arrow type {fn.typ}')
+    if fn.Type().arg != arg.Type():
+      raise TypeError(f'Mismatched types {fn} got {arg}')
+    self.typ = self.fn.Type().ret
+
+  def __str__(self):
+    fn = self.fn
+    if isinstance(fn, Expression):
+      fn = fn.term
+    fn_str = str(self.fn)
+    if isinstance(fn, Apply):
+      fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
+    arg = str(self.arg)
+    if ':' in arg and not self._ShouldDisplayArgType():
+      arg = ':'.join(arg.split(':')[:-1])
+    return f'({fn_str} {arg}):{self.typ}'
+
+
+class Abstract(Term):
+  def __init__(self, arg: Union[Var, BindingVar], body: Term):
+    self.arg = arg
+    self.body = body
+    if isinstance(arg, BindingVar):
+      body.MaybeBindFreeVarsTo(arg)
+    self.typ = Arrow(self.arg.typ, self.body.typ)
+
+  def __str__(self):
+    body = self.BodyTerm()
+    args = str(self.arg)
+    while isinstance(body, Abstract):
+      args = body._AppendMultiArgStr(args, body)
+      body = body.BodyTerm()
+    return f'(λ{args}.{body}):{self.typ}'
+
+  def BodyTerm(self) -> Term:
+    if isinstance(self.body, Expression):
+      return self.body.term
+    return self.body
+
+  def _AppendMultiArgStr(self, args_str, body):
+    return args_str + f'.λ{body.arg}'
+
+
+class Expression(Term):
+  term: Term
+  typ: TypeExpression
+
+  def __init__(self, u: Term):
+    match u:
+      case Expression():
+        self.term = u.Copy().term
+      case Var():
+        self.term = FreeVar(u)
+      case FreeVar():
+        self.term = u
+      case BoundVar():
+        self.term = u
+      case Apply():
+        self.term = Apply(Expression(u.fn), Expression(u.arg))
+      case Abstract():
+        v = u.arg
+        if not isinstance(v, BindingVar):
+          v = BindingVar(v)
+        self.term = Abstract(v, Expression(u.body))
+      case _:
+        raise NotImplementedError(f'Unexpected input to Expression {type(u)}')
+    self.SetType(TypeExpression(u.typ))
+
+  def __str__(self):
+    return str(self.term)
+
+  def __eq__(self, other):
+    return AlphaEquiv(self, other)
+
+  def Closed(self) -> bool:
+    return len(FreeVars(self)) == 0
+
+  # def BetaNormal(self) -> bool:
+  #   return len(Redexes(self)) == 0
+
+  def SetType(self, typ: TypeExpression):
+    self.typ = typ
+    self.term.typ = typ
+    if isinstance(self.term, Occurrence):
+      self.term.var.typ = typ
+
+  def MaybeBindFreeVarsTo(self, bv: BindingVar):
+    match self.term:
+      case Var():
+        raise Exception('Should not store Var in Expression')
+      case BindingVar():
+        raise Exception('Should not store BindingVar in Expression')
+      case FreeVar():
+        if bv.ShouldBind(self.term):
+          self.term = BoundVar(bv, self.term)
+      case BoundVar():
+        pass
+      case Apply():
+        self.term.fn.MaybeBindFreeVarsTo(bv)
+        self.term.arg.MaybeBindFreeVarsTo(bv)
+      case Abstract():
+        self.term.body.MaybeBindFreeVarsTo(bv)
+      case _:
+        raise NotImplementedError(
+            f'Unexpected member of Expression {self.term}'
+        )
+  
+  def MaybeBindFreeTypesTo(self, btv: BindingTypeVar):
+    match self.term:
+      case Var():
+        raise Exception('Should not store Var in Expression')
+      case BindingVar():
+        raise Exception('Should not store BindingVar in Expression')
+      case Occurrence():
+        if btv.ShouldBind(self.term.typ.typ):
+          self.typ.MaybeBindFreeTypesTo(btv)
+          self.SetType(self.typ)
+      case Apply():
+        self.term.fn.MaybeBindFreeTypesTo(btv)
+        self.term.arg.MaybeBindFreeTypesTo(btv)
+      case Abstract():
+        self.term.arg.typ.MaybeBindFreeTypesTo(btv)
+        self.term.body.MaybeBindFreeTypesTo(btv)
+      case _:
+        raise NotImplementedError(f'Unexpected member of Expression {self.term}')
+    self.typ.MaybeBindFreeTypesTo(btv)
+
+  def Copy(self):
+    match self.term:
+      case FreeVar() | BoundVar():
+        return Expression(self.term.var)
+      case Apply():
+        return Expression(Apply(self.term.fn.Copy(), self.term.arg.Copy()))
+      case Abstract():
+        bv = self.term.arg
+        return Expression(Abstract(bv.var, self.term.body.Copy()))
+      case _:
+        raise NotImplementedError(
+            f'Unexpected member of Expression {self.term}'
+        )
+
+
+class Statement:
+  subj: Union[Kind, TypeExpression, Expression]
+  typ: Union[TypeExpression, Kind, AllKinds]
+
+  def __init__(self, subj: Union[Kind, TypeExpression, Expression]):
+    self.subj = subj
+    match subj:
+      case Kind():
+        self.typ = AllKinds()
+      case TypeExpression():
+        self.typ = subj.kind
+      case Expression():
+        self.typ = subj.typ
+      case _:
+        raise NotImplementedError(f'Unexpected input to Statement {subj}')
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class KindDeclaration:
+  def __init__(self, subj_k: Kind):
+    if not isinstance(subj_k, Kind):
+      raise ValueError(f'Cannot create KindDeclaration with {subj_k}')
+    self.subj = subj_k
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class TypeDeclaration:
+  def __init__(self, subj_t: TypeVar):
+    if not isinstance(subj_t, TypeVar):
+      raise ValueError(f'Cannot create TypeDeclaration with {subj_t}')
+    self.subj = BindingTypeVar(subj_t)
+
+  def Type(self):
+    return self.subj.typ
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class VarDeclaration:
+  def __init__(self, subj: Var):
+    if not isinstance(subj, Var):
+      raise ValueError(f'Cannot create VarDeclaration with {subj}')
+    self.subj = BindingVar(subj)
+
+  def Var(self):
+    return self.subj.var
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Domain(Multiset[Union[Var, TypeVar]]):
+    def __init__(self, kinds: list[Kind], types: list[TypeVar], vars: list[Var]):
+      self.kinds = Multiset(kinds)
+      self.vars = Multiset(vars)
+      self.types = Multiset(types)
+      self.elems = self.kinds.elems + self.types.elems + self.vars.elems
+
+    def ContainsKind(self, u: Kind):
+      assert isinstance(u, Kind)
+      return self.kinds.Contains(u)
+
+    def ContainsTypeVar(self, u: TypeVar):
+      assert isinstance(u, TypeVar)
+      return self.types.Contains(u)
+
+    def ContainsVar(self, u: Var):
+      assert isinstance(u, Var)
+      return self.vars.Contains(u)
+
+
+class Context:
+  def __init__(self, *args: list[Union[Kind, TypeVar, Var]]):
+    self.kind_declarations = []
+    self.typ_declarations = []
+    self.var_declarations = []
+    self.str_declarations = []  # To preserve order for printing only
+    for u in args:
+      self.str_declarations.append(str(u))
+      match u:
+        case Kind():
+          self.kind_declarations.append(KindDeclaration(u))
+        case TypeVar():
+          if not self.ContainsKind(u.kind):
+            raise ValueError(f'Context {self} does not contain kinds in {u}')
+          self.typ_declarations.append(TypeDeclaration(u))
+        case Var():
+          for tv in FreeTypeVars(TypeExpression(u.typ)):
+            if not self.ContainsTypeVar(tv.typ):
+              raise ValueError(f'Context {self} does not contain free types in {u}')
+          self.var_declarations.append(VarDeclaration(u))
+        case _:
+          raise NotImplementedError(f'Unexpected input to Context {u}')
+  
+  def __str__(self):
+    if not self.str_declarations:
+      return 'Ø'
+    return ', '.join([d for d in self.str_declarations])
+
+  # Overload for subcontext, A < B returns if A is a subcontext of B
+  def __lt__(self, other):
+    for u in self.kind_declarations:
+      if not any(u.subj == v.subj for v in other.kind_declarations):
+        return False
+    for u in self.typ_declarations:
+      if not any(u.subj.typ == v.subj.typ for v in other.typ_declarations):
+        return False
+    for u in self.var_declarations:
+      if not any(u.subj.var == v.subj.var for v in other.var_declarations):
+        return False
+    return True
+
+  def BindStatementFreeVars(self, sttmt: Statement):
+    if isinstance(sttmt.subj, Kind):
+      return
+    for decl in self.typ_declarations:
+      sttmt.subj.MaybeBindFreeTypesTo(decl.subj)
+    if isinstance(sttmt.subj, TypeExpression):
+      return
+    for decl in self.var_declarations:
+      sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+
+  def ContainsKind(self, kind: Kind):
+    return self.Dom().ContainsKind(kind)
+
+  def ContainsTypeVar(self, typ: TypeVar):
+    return self.Dom().ContainsTypeVar(typ)
+
+  def ContainsVar(self, u: Var):
+    return self.Dom().ContainsVar(u)
+
+  def Dom(self) -> Domain:
+    return Domain(
+        [decl.subj for decl in self.kind_declarations],
+        [decl.subj.typ for decl in self.typ_declarations],
+        [decl.subj.var for decl in self.var_declarations]
+    )
+
+  def PushTypeVar(self, u: TypeVar):
+    assert isinstance(u, TypeVar)
+    if self.ContainsTypeVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    return Context(*self.Dom(), u)
+
+  def PushVar(self, u: Var):
+    assert isinstance(u, Var)
+    if self.ContainsVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    if not self.ContainsFreeTypes(TypeExpression(u.typ)):
+      raise TypeError(
+          f'Context {self} does not contain free type variables in {u.typ}'
+      )
+    return Context(*self.Dom(), u)
+
+  def ContainsFreeTypes(self, rho: TypeExpression):
+    assert isinstance(rho, TypeExpression)
+    return all(
+        self.ContainsTypeVar(alpha.typ) for alpha in FreeTypeVars(rho)
+    )
+
+
+class Judgement:
+  def __init__(self, ctx: Context, stmt: Statement):
+    self.ctx = ctx
+    self.stmt = stmt
+    self.ctx.BindStatementFreeVars(stmt)
+
+  def __str__(self):
+    return f'{self.ctx} |- {self.stmt}'
+
+
+class DerivationRule:
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if premisses:
+      ctx = premisses[0].ctx
+      for pmiss in premisses:
+        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+          raise ValueError(
+              'Cannot use different Contexts in premisses of '
+              f'the same DerivationRule: {ctx} != {pmiss.ctx}'
+          )
+    self.premisses = premisses
+  
+  def Conclusion(self) -> Judgement:
+    raise NotImplementedError(
+        'Do not call Conclusion with DerivationRule subclass'
+    )
+
+  def __str__(self):
+    premiss_str = ', '.join([str(p) for p in self.premisses])
+    horiz_rule = '-' * len(premiss_str)
+    if premiss_str:
+      return f'{premiss_str}\n{horiz_rule}\n{self.Conclusion()}'
+    return str(self.Conclusion())
+
+
+class SortRule(DerivationRule):
+  def __init__(self, ctx: Context):
+    super().__init__()
+    self.ctx = ctx
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(Star()))
+
+
+class VarRule(DerivationRule):
+  def __init__(self, ctx: Context, premiss: Judgement, u: Union[TypeVar, Var]):
+    super().__init__(premiss)
+    self.ctx = ctx
+    match u:
+      case TypeVar():
+        if not ctx.ContainsTypeVar(u):
+          raise ValueError(
+              f'Cannot create VarRule {u} missing from Context {ctx}'
+          )
+        if not isinstance(premiss.stmt.subj, Kind):
+          raise ValueError(
+              f'Cannot create VarRule for {u} with premiss {premiss}'
+          )
+        if premiss.stmt.subj != u.kind:
+          raise TypeError(
+              f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
+          )
+      case Var():
+        if not ctx.ContainsVar(u):
+          raise ValueError(
+              f'Cannot create VarRule {u} missing from Context {ctx}'
+          )
+        if not isinstance(premiss.stmt.subj, TypeExpression):
+          raise ValueError(
+              f'Cannot create VarRule for {u} with premiss {premiss}'
+          )
+        if premiss.stmt.subj.typ != u.typ:
+          raise TypeError(
+              f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
+          )
+      case _:
+        raise NotImplementedError(f'Unexpected input to VarRule {u}')
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    match self.u:
+      case TypeVar():
+        stmt = Statement(TypeExpression(self.u))
+      case Var():
+        stmt = Statement(Expression(self.u))
+    return Judgement(self.ctx, stmt)

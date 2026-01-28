@@ -24,5 +24,25 @@ def RunExamples():
   print(aa)
 
 
+  print('\nExample of 4.2.1')
+  print('Sort rule:')
+  print(SortRule(Context()))
+
+
+  print('\nExample of 4.2.2')
+  print('Var rule for type:')
+  alpha = TypeVar('α', Star())
+  ctx = Context(Star(), alpha)
+  premiss = SortRule(ctx).Conclusion()
+  print(VarRule(ctx, premiss, alpha))
+  print('Var rule for term:')
+  x = Var('x', alpha)
+  ctx = ctx.PushVar(x)
+  premiss1 = SortRule(ctx).Conclusion()
+  premiss2 = VarRule(ctx, premiss1, alpha).Conclusion()
+  print(VarRule(ctx, premiss2, x))
+
+
+
 if __name__ == '__main__':
   RunExamples()
