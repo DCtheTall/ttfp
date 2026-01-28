@@ -43,6 +43,5 @@ def RunExamples():
   print(VarRule(ctx, premiss2, x))
 
 
-
 if __name__ == '__main__':
   RunExamples()

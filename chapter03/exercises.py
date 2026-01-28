@@ -6,8 +6,26 @@ Chapter 3 Exercises
 
 import itertools
 
-from second_order_typed_lambda_calculus import *
-
+from second_order_typed_lambda_calculus import (
+    Abstract,
+    AbstractT,
+    Apply,
+    ApplyT,
+    Arrow,
+    BetaReduce,
+    Context,
+    DeriveTerm,
+    DeriveType,
+    Expression,
+    ExpressionType,
+    FindTerm,
+    Judgement,
+    OneStepBetaReduce,
+    PiType,
+    Statement,
+    TypeVar,
+    Var,
+)
 
 
 def RunExercises():

@@ -1537,7 +1537,8 @@ class Derivation:
       except ValueError:
         return -1
     declarations = sorted(
-        self.conclusions[0].ctx.declarations,
+        self.conclusions[0].ctx.typ_declarations
+        + self.conclusions[0].ctx.var_declarations,
         key=lambda d: _SortKey(d, var_abst_order, typ_abst_order)
     )
     for decl in declarations:
@@ -1749,7 +1750,7 @@ def FindTerm(
             ctx.PushVar(u), ExpressionType(typ.Type().ret), new_visited, new_vars
         )
         return ctx, Expression(Abstract(u, body))
-    for decl in ctx.declarations:
+    for decl in ctx.typ_declarations + ctx.var_declarations:
       if isinstance(decl, TypeDeclaration):
         continue
       candidate_term = Expression(decl.subj.var)
