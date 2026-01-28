@@ -32,15 +32,23 @@ def RunExamples():
   print('\nExample of 4.2.2')
   print('Var rule for type:')
   alpha = TypeVar('α', Star())
-  ctx = Context(Star(), alpha)
+  ctx = Context()
   premiss = SortRule(ctx).Conclusion()
   print(VarRule(ctx, premiss, alpha))
   print('Var rule for term:')
+  ctx = Context()
   x = Var('x', alpha)
-  ctx = ctx.PushVar(x)
   premiss1 = SortRule(ctx).Conclusion()
   premiss2 = VarRule(ctx, premiss1, alpha).Conclusion()
-  print(VarRule(ctx, premiss2, x))
+  print(VarRule(premiss2.ctx, premiss2, x))
+
+
+  print('\nExample 4.2.3')
+  deriv = Derivation(Context())
+  i = deriv.VarRule(alpha)
+  ii = deriv.VarRule(x)
+  print(deriv.LinearFormat())
+  # TODO flag format
 
 
 if __name__ == '__main__':

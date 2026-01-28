@@ -75,9 +75,10 @@ class TypeVar(Type):
     return f'{self.name}:{self.kind}'[:-2]
 
   def __eq__(self, other):
+    if isinstance(other, TypeExpression):
+      other = other.Type()
     if isinstance(other, TOccurrence):
       other = other.typ
-    assert isinstance(other, TypeVar)
     return (self.name, self.kind) == (other.name, other.kind)
 
 
@@ -655,7 +656,7 @@ class Context:
         case Kind():
           self.kind_declarations.append(KindDeclaration(u))
         case TypeVar():
-          if not self.ContainsKind(u.kind):
+          if u.kind != Star() and not self.ContainsKind(u.kind):
             raise ValueError(f'Context {self} does not contain kinds in {u}')
           self.typ_declarations.append(TypeDeclaration(u))
         case Var():
@@ -709,6 +710,9 @@ class Context:
         [decl.subj.typ for decl in self.typ_declarations],
         [decl.subj.var for decl in self.var_declarations]
     )
+
+  def PushKind(self, kind: Kind):
+    return Context(*self.Dom(), kind)
 
   def PushTypeVar(self, u: TypeVar):
     assert isinstance(u, TypeVar)
@@ -783,9 +787,9 @@ class VarRule(DerivationRule):
     self.ctx = ctx
     match u:
       case TypeVar():
-        if not ctx.ContainsTypeVar(u):
+        if ctx.ContainsTypeVar(u):
           raise ValueError(
-              f'Cannot create VarRule {u} missing from Context {ctx}'
+              f'Cannot create VarRule {u} already occurs in Context {ctx}'
           )
         if not isinstance(premiss.stmt.subj, Kind):
           raise ValueError(
@@ -795,10 +799,11 @@ class VarRule(DerivationRule):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
+        self.ctx = self.ctx.PushTypeVar(u)
       case Var():
-        if not ctx.ContainsVar(u):
+        if ctx.ContainsVar(u):
           raise ValueError(
-              f'Cannot create VarRule {u} missing from Context {ctx}'
+              f'Cannot create VarRule {u} already occurs in Context {ctx}'
           )
         if not isinstance(premiss.stmt.subj, TypeExpression):
           raise ValueError(
@@ -808,6 +813,7 @@ class VarRule(DerivationRule):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
+        self.ctx = self.ctx.PushVar(u)
       case _:
         raise NotImplementedError(f'Unexpected input to VarRule {u}')
     self.u = u
@@ -819,3 +825,82 @@ class VarRule(DerivationRule):
       case Var():
         stmt = Statement(Expression(self.u))
     return Judgement(self.ctx, stmt)
+
+
+class Derivation:
+  def __init__(self, ctx: Context):
+    # All derivations in this system start with (sort).
+    self.ctx = ctx
+    sort_rule = SortRule(ctx)
+    self.rules: list[DerivationRule] = [sort_rule]
+    self.conclusions: list[Judgement] = [sort_rule.Conclusion()]
+
+  def SortRulePremiss(self) -> Judgement:
+    return self.conclusions[0]
+
+  def _AddRule(self, rule: DerivationRule) -> Judgement:
+    self.rules.append(rule)
+    concl = rule.Conclusion()
+    self.conclusions.append(concl)
+    return concl
+
+  def _PremissForType(self, typ: TypeVar):
+    for i, rule in enumerate(self.rules):
+      if (
+          isinstance(rule, VarRule)
+          and isinstance(rule.u, TypeVar)
+          and rule.u == typ
+      ):
+        return self.conclusions[i]
+    raise TypeError(f'{typ} is not declared')
+
+  def VarRule(self, u: Union[TypeVar, Var]) -> Judgement:
+    if len(self.rules) == 1:
+      assert isinstance(u, TypeVar), type(u)
+      assert u.kind == Star()
+      premiss = self.SortRulePremiss()
+    for i, rule in enumerate(self.rules):
+      if not isinstance(rule, VarRule):
+        continue
+      match (u, rule.u):
+        case (TypeVar(), TypeVar()):
+          if rule.u == u:
+            return self.conclusions[i]
+          assert u.kind == Star()  # TODO other kinds
+          premiss = self.SortRulePremiss()
+        case (TypeVar(), _):
+          premiss = self.SortRulePremiss()
+        case (Var(), Var()):
+          if rule.u == u:
+            return self.conclusions[i]
+          premiss = self._PremissForType(u.Type())
+        case (Var(), _):
+          premiss = self._PremissForType(u.Type())
+        case (_, _):
+          raise NotImplementedError(f'Unexpected input to VarRule {u}')
+    assert premiss is not None
+    concl = self._AddRule(VarRule(self.ctx, premiss, u))
+    self.ctx = self.rules[-1].ctx
+    return concl
+  
+  def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
+    match rule:
+      case SortRule():
+        return '(sort)'
+      case VarRule():
+        typ_key = keys[rule.premisses[0]]
+        return f'(var) on ({typ_key})'
+      case _:
+        raise ValueError(f'Unexpected input to Justification {rule}')
+
+  def LinearFormat(self) -> str:
+    result = []
+    keys: dict[Judgement, str] = {}
+    for rule, concl in zip(self.rules, self.conclusions):
+      key = chr(ord('a') + len(keys))
+      keys[concl] = key
+      justif = self._Justification(rule, keys)
+      line = f'({key}) {concl}    {justif}'
+      result.append(line)
+      result.append('-' * len(line))
+    return '\n'.join(result)
