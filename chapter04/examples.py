@@ -34,13 +34,13 @@ def RunExamples():
   alpha = TypeVar('α', Star())
   ctx = Context()
   premiss = SortRule(ctx).Conclusion()
-  print(VarRule(ctx, premiss, alpha))
+  print(VarRule(premiss, alpha))
   print('Var rule for term:')
   ctx = Context()
   x = Var('x', alpha)
   premiss1 = SortRule(ctx).Conclusion()
-  premiss2 = VarRule(ctx, premiss1, alpha).Conclusion()
-  print(VarRule(premiss2.ctx, premiss2, x))
+  premiss2 = VarRule(premiss1, alpha).Conclusion()
+  print(VarRule(premiss2, x))
 
 
   print('\nExample 4.2.3')
@@ -49,6 +49,42 @@ def RunExamples():
   ii = deriv.VarRule(x)
   print(deriv.LinearFormat())
   # TODO flag format
+
+
+  print('\nExamples from 4.3.2')
+  print('First derivation (?1):')
+  deriv = Derivation(Context())
+  i = deriv.VarRule(alpha)
+  ii = deriv.WeakRule(x, i, i)
+  print(deriv.LinearFormat())
+  print('Second derivation (?2):')
+  deriv = Derivation(Context())
+  i = deriv.VarRule(alpha)
+  beta = TypeVar('β', Star())
+  ii = deriv.WeakRule(beta, i, i)
+  print(deriv.LinearFormat())
+  print('Third derivation (?3):')
+  deriv = Derivation(Context())
+  i = deriv.WeakRule(
+      alpha, deriv.SortRulePremiss(), deriv.SortRulePremiss()
+  )
+  ii = deriv.VarRule(beta)
+  print(deriv.LinearFormat())
+  print('Fourth derivation (?4):')
+  deriv = Derivation(Context())
+  i = deriv.WeakRule(
+      alpha, deriv.SortRulePremiss(), deriv.SortRulePremiss()
+  )
+  print(deriv.LinearFormat())
+
+
+  print('\nExample from 4.4.1')
+  deriv = Derivation(Context())
+  i = deriv.VarRule(alpha)
+  ii = deriv.VarRule(beta)
+  iii = deriv.FormRule(i, ii)
+  iv = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
+  print(deriv.LinearFormat())
 
 
 if __name__ == '__main__':

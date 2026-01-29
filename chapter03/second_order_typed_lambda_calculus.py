@@ -1294,7 +1294,7 @@ class Context:
         return False
     return True
 
-  def Insersect(self, other):
+  def Intersect(self, other):
     if self < other:
       return self
     assert other < self
@@ -1359,7 +1359,7 @@ class ApplRule(DerivationRule):
     fn = p_fn.stmt.subj
     arg = p_arg.stmt.subj
     expr = Expression(Apply(fn, arg))
-    return Judgement(p_fn.ctx.Insersect(p_arg.ctx), Statement(expr, expr.typ))
+    return Judgement(p_fn.ctx.Intersect(p_arg.ctx), Statement(expr, expr.typ))
 
 
 class AbstRule(DerivationRule):

@@ -143,6 +143,12 @@ class TArrow(Type):
     self.ret = ret
     self.kind = Star()
 
+  def __str__(self):
+    ret_str = str(self.ret)
+    if isinstance(self.ret, TArrow):
+      ret_str = ret_str[1:-1]
+    return f'({self.arg} -> {ret_str}):{str(self.kind)[:-2]}'
+
 
 class TAbstract(Type):
   def __init__(self, arg: Type, body: Type):
@@ -651,7 +657,9 @@ class Context:
     self.var_declarations = []
     self.str_declarations = []  # To preserve order for printing only
     for u in args:
-      self.str_declarations.append(str(u))
+      u_str = str(u)
+      if u_str != str(Star()):
+        self.str_declarations.append(u_str)
       match u:
         case Kind():
           self.kind_declarations.append(KindDeclaration(u))
@@ -782,26 +790,21 @@ class SortRule(DerivationRule):
 
 
 class VarRule(DerivationRule):
-  def __init__(self, ctx: Context, premiss: Judgement, u: Union[TypeVar, Var]):
+  def __init__(self, premiss: Judgement, u: Union[TypeVar, Var]):
     super().__init__(premiss)
-    self.ctx = ctx
+    self.ctx = premiss.ctx
     match u:
       case TypeVar():
-        if ctx.ContainsTypeVar(u):
+        if self.ctx.ContainsTypeVar(u):
           raise ValueError(
               f'Cannot create VarRule {u} already occurs in Context {ctx}'
           )
-        if not isinstance(premiss.stmt.subj, Kind):
-          raise ValueError(
-              f'Cannot create VarRule for {u} with premiss {premiss}'
-          )
-        if premiss.stmt.subj != u.kind:
+        if u.kind != Star() and premiss.stmt.subj != u.kind:
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
-        self.ctx = self.ctx.PushTypeVar(u)
       case Var():
-        if ctx.ContainsVar(u):
+        if self.ctx.ContainsVar(u):
           raise ValueError(
               f'Cannot create VarRule {u} already occurs in Context {ctx}'
           )
@@ -813,7 +816,6 @@ class VarRule(DerivationRule):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
-        self.ctx = self.ctx.PushVar(u)
       case _:
         raise NotImplementedError(f'Unexpected input to VarRule {u}')
     self.u = u
@@ -822,9 +824,97 @@ class VarRule(DerivationRule):
     match self.u:
       case TypeVar():
         stmt = Statement(TypeExpression(self.u))
+        ctx = self.ctx.PushTypeVar(self.u)
       case Var():
         stmt = Statement(Expression(self.u))
-    return Judgement(self.ctx, stmt)
+        ctx = self.ctx.PushVar(self.u)
+    return Judgement(ctx, stmt)
+
+
+class WeakRule(DerivationRule):
+  def __init__(self, u: Union[TypeVar, Var], *premisses):
+    if len(premisses) != 2:
+      raise ValueError('Can only create WeakRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_ab, p_cs = self.premisses
+    assert p_ab.ctx == p_cs.ctx
+    ab = p_ab.stmt.subj
+    match ab:
+      case Expression():
+        if not isinstance(ab.term, BoundVar):
+          raise TypeError(f'Invalid first premiss for WeakRule {p_ab}')
+      case TypeExpression():
+        assert isinstance(ab.typ, BoundTypeVar)
+      case Kind():
+        assert isinstance(ab, Kind)
+      case _:
+        raise NotImplementedError(
+            f'Unexpected premiss for WeakRule {p_ab}'
+        )
+    cs = p_cs.stmt.subj
+    match u:
+      case Var():
+        if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
+          raise ValueError(f'Cannot redeclare variable {u}')
+        if not isinstance(cs, TypeExpression) and cs.Type() != u.Type():
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u}'
+          )
+      case TypeVar():
+        if p_ab.ctx.ContainsTypeVar(u) or p_cs.ctx.ContainsTypeVar(u):
+          raise ValueError(f'Cannot redeclare type variable {u}')
+        if not isinstance(cs, Kind) and cs.kind != u.kind:
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u} '
+          )
+    self.u = u
+    self.ctx = p_ab.ctx
+
+  def Conclusion(self) -> Judgement:
+    p_ab, p_c = self.premisses
+    ctx = self.ctx
+    match self.u:
+      case TypeVar():
+        if not self.ctx.ContainsTypeVar(self.u):
+          ctx = self.ctx.PushTypeVar(self.u)
+        if isinstance(p_ab.stmt.subj, Kind):
+          subj = p_ab.stmt.subj
+        else:
+          subj = p_ab.stmt.subj.Copy()
+      case Var():
+        if not self.ctx.ContainsVar(self.u):
+          ctx = self.ctx.PushVar(self.u)
+        subj = p_ab.stmt.subj.Copy()
+    return Judgement(ctx, Statement(subj))
+
+
+class FormRule(DerivationRule):
+  def __init__(self, *premisses):
+    if len(premisses) != 2:
+      raise ValueError('Can only create WeakRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_a, p_b = self.premisses
+    assert p_a.ctx < p_b.ctx or p_b.ctx < p_a.ctx
+    if p_a.ctx < p_b.ctx:
+      self.ctx = p_b.ctx
+    else:
+      self.ctx = p_a.ctx
+    a = p_a.stmt.subj
+    b = p_b.stmt.subj
+    if Sort(a) != Sort(b):
+      raise TypeError(
+          f'Both premisses in FormRule must be same sort {p_a} {p_b}'
+      )
+    match a:
+      case Kind():
+        self.ab = KArrow(a, b)
+      case Type():
+        self.ab = TypeExpression(TArrow(a, b))
+      case _:
+        raise NotImplementedError(f'Unexpected input to FormRule {p_a}')
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(self.ab))
 
 
 class Derivation:
@@ -840,7 +930,11 @@ class Derivation:
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
+    for p in rule.premisses:
+      assert p.ctx < self.ctx
+    self.rules[-1].ctx = self.ctx
     concl = rule.Conclusion()
+    self.ctx = concl.ctx
     self.conclusions.append(concl)
     return concl
 
@@ -855,10 +949,7 @@ class Derivation:
     raise TypeError(f'{typ} is not declared')
 
   def VarRule(self, u: Union[TypeVar, Var]) -> Judgement:
-    if len(self.rules) == 1:
-      assert isinstance(u, TypeVar), type(u)
-      assert u.kind == Star()
-      premiss = self.SortRulePremiss()
+    premiss = None
     for i, rule in enumerate(self.rules):
       if not isinstance(rule, VarRule):
         continue
@@ -867,7 +958,7 @@ class Derivation:
           if rule.u == u:
             return self.conclusions[i]
           assert u.kind == Star()  # TODO other kinds
-          premiss = self.SortRulePremiss()
+          premiss = self.conclusions[-1]
         case (TypeVar(), _):
           premiss = self.SortRulePremiss()
         case (Var(), Var()):
@@ -878,18 +969,41 @@ class Derivation:
           premiss = self._PremissForType(u.Type())
         case (_, _):
           raise NotImplementedError(f'Unexpected input to VarRule {u}')
-    assert premiss is not None
-    concl = self._AddRule(VarRule(self.ctx, premiss, u))
-    self.ctx = self.rules[-1].ctx
+    if premiss is None:
+      assert isinstance(u, TypeVar), type(u)
+      assert u.kind == Star()
+      premiss = self.conclusions[-1]
+    concl = self._AddRule(VarRule(premiss, u))
     return concl
+
+  def WeakRule(self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement):
+    assert p_ab in self.conclusions
+    assert p_cs in self.conclusions
+    assert p_ab.ctx < self.ctx and p_cs.ctx < self.ctx
+    return self._AddRule(WeakRule(u, p_ab, p_cs))
+
+  def FormRule(self, p_a: Judgement, p_b: Judgement):
+    assert p_a in self.conclusions
+    assert p_b in self.conclusions
+    return self._AddRule(FormRule(p_a, p_b))
   
-  def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
+  def _Justification(
+      self, rule: DerivationRule, keys: dict[Judgement, str]
+  ) -> str:
     match rule:
       case SortRule():
         return '(sort)'
       case VarRule():
         typ_key = keys[rule.premisses[0]]
         return f'(var) on ({typ_key})'
+      case WeakRule():
+        ab_key = keys[rule.premisses[0]]
+        cs_key = keys[rule.premisses[1]]
+        return f'(weak) on ({ab_key}) and ({cs_key})'
+      case FormRule():
+        a_key = keys[rule.premisses[0]]
+        b_key = keys[rule.premisses[1]]
+        return f'(form) on ({a_key}) and ({b_key})'
       case _:
         raise ValueError(f'Unexpected input to Justification {rule}')
 
