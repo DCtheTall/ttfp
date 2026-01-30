@@ -87,5 +87,15 @@ def RunExamples():
   print(deriv.LinearFormat())
 
 
+  print('\nExamples from 4.5')
+  deriv = Derivation(Context())
+  i = deriv.VarRule(alpha)
+  ii = deriv.VarRule(beta)
+  iii = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
+  iv = deriv.AbstRule(alpha, i, iii)
+  v = deriv.ApplRule(iv, ii)
+  print(deriv.LinearFormat())
+
+
 if __name__ == '__main__':
   RunExamples()

@@ -52,7 +52,7 @@ class Type:
   def __str__(self):
     raise NotImplementedError('Do not cast Type subclass to str')
 
-  def Proper(self):
+  def Proper(self) -> bool:
     return self.kind == Star()
 
 
@@ -167,7 +167,7 @@ class TAbstract(Type):
       body = body.body_key
     return f'(λ{args}.{body}):{self.kind}'[:-2]
 
-  def _AppendMultiArgStr(self, args_str, body):
+  def _AppendMultiArgStr(self, args_str, body) -> str:
     return args_str + f'.λ{body.arg}'
 
 
@@ -307,7 +307,7 @@ class FreeTypeVars(Multiset[TypeVar]):
       case _:
         raise NotImplementedError(f'Unexpected input to OccursFree {T}')
 
-  def ContainsBindingVar(self, btv: BindingTypeVar):
+  def ContainsBindingVar(self, btv: BindingTypeVar) -> bool:
     return self.Contains(btv.typ)
 
 
@@ -317,7 +317,7 @@ class Term:
   def __str__(self):
     raise NotImplementedError('Not implemented')
 
-  def Type(self):
+  def Type(self) -> Type:
     typ = self.typ
     if isinstance(typ, TypeExpression):
       typ = typ.typ
@@ -334,6 +334,8 @@ class Var(Term):
   def __init__(self, name: str, typ: Type):
     self.name = name
     self.typ = typ
+    if not self.typ.Proper():
+      raise TypeError(f'Can only create terms with proper type got {typ}')
 
   def __str__(self):
     line = f'{self.name}:{self.typ}'
@@ -423,7 +425,7 @@ class FreeVars(Multiset[Var]):
       case _:
         raise NotImplementedError(f'Unexpected member of Expression {e.term}')
 
-  def ContainsBindingVar(self, bv: BindingVar):
+  def ContainsBindingVar(self, bv: BindingVar) -> bool:
     return self.Contains(bv.var)
 
 
@@ -436,6 +438,7 @@ class Apply(Term):
     if fn.Type().arg != arg.Type():
       raise TypeError(f'Mismatched types {fn} got {arg}')
     self.typ = self.fn.Type().ret
+    assert self.typ.Proper()
 
   def __str__(self):
     fn = self.fn
@@ -457,6 +460,7 @@ class Abstract(Term):
     if isinstance(arg, BindingVar):
       body.MaybeBindFreeVarsTo(arg)
     self.typ = Arrow(self.arg.typ, self.body.typ)
+    assert self.typ.Proper()
 
   def __str__(self):
     body = self.BodyTerm()
@@ -471,7 +475,7 @@ class Abstract(Term):
       return self.body.term
     return self.body
 
-  def _AppendMultiArgStr(self, args_str, body):
+  def _AppendMultiArgStr(self, args_str, body) -> str:
     return args_str + f'.λ{body.arg}'
 
 
@@ -508,9 +512,6 @@ class Expression(Term):
 
   def Closed(self) -> bool:
     return len(FreeVars(self)) == 0
-
-  # def BetaNormal(self) -> bool:
-  #   return len(Redexes(self)) == 0
 
   def SetType(self, typ: TypeExpression):
     self.typ = typ
@@ -559,7 +560,7 @@ class Expression(Term):
         raise NotImplementedError(f'Unexpected member of Expression {self.term}')
     self.typ.MaybeBindFreeTypesTo(btv)
 
-  def Copy(self):
+  def Copy(self) -> 'Expression':
     match self.term:
       case FreeVar() | BoundVar():
         return Expression(self.term.var)
@@ -610,7 +611,7 @@ class TypeDeclaration:
       raise ValueError(f'Cannot create TypeDeclaration with {subj_t}')
     self.subj = BindingTypeVar(subj_t)
 
-  def Type(self):
+  def Type(self) -> Type:
     return self.subj.typ
 
   def __str__(self):
@@ -623,7 +624,7 @@ class VarDeclaration:
       raise ValueError(f'Cannot create VarDeclaration with {subj}')
     self.subj = BindingVar(subj)
 
-  def Var(self):
+  def Var(self) -> Var:
     return self.subj.var
 
   def __str__(self):
@@ -637,15 +638,15 @@ class Domain(Multiset[Union[Var, TypeVar]]):
       self.types = Multiset(types)
       self.elems = self.kinds.elems + self.types.elems + self.vars.elems
 
-    def ContainsKind(self, u: Kind):
+    def ContainsKind(self, u: Kind) -> bool:
       assert isinstance(u, Kind)
       return self.kinds.Contains(u)
 
-    def ContainsTypeVar(self, u: TypeVar):
+    def ContainsTypeVar(self, u: TypeVar) -> bool:
       assert isinstance(u, TypeVar)
       return self.types.Contains(u)
 
-    def ContainsVar(self, u: Var):
+    def ContainsVar(self, u: Var) -> bool:
       assert isinstance(u, Var)
       return self.vars.Contains(u)
 
@@ -703,13 +704,13 @@ class Context:
     for decl in self.var_declarations:
       sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
 
-  def ContainsKind(self, kind: Kind):
+  def ContainsKind(self, kind: Kind) -> bool:
     return self.Dom().ContainsKind(kind)
 
-  def ContainsTypeVar(self, typ: TypeVar):
+  def ContainsTypeVar(self, typ: TypeVar) -> bool:
     return self.Dom().ContainsTypeVar(typ)
 
-  def ContainsVar(self, u: Var):
+  def ContainsVar(self, u: Var) -> bool:
     return self.Dom().ContainsVar(u)
 
   def Dom(self) -> Domain:
@@ -719,10 +720,10 @@ class Context:
         [decl.subj.var for decl in self.var_declarations]
     )
 
-  def PushKind(self, kind: Kind):
+  def PushKind(self, kind: Kind) -> 'Context':
     return Context(*self.Dom(), kind)
 
-  def PushTypeVar(self, u: TypeVar):
+  def PushTypeVar(self, u: TypeVar) -> 'Context':
     assert isinstance(u, TypeVar)
     if self.ContainsTypeVar(u):
       raise Exception(f'Context {self} contains {u}')
@@ -738,11 +739,37 @@ class Context:
       )
     return Context(*self.Dom(), u)
 
+  def PullVar(self, u: Var) -> 'Context':
+    if not self.ContainsVar(u):
+      raise Exception(f'Context {self} does not contain {u}')
+    new_ctx = []
+    for v in self.Dom():
+      if isinstance(v, Var) and u == v:
+        continue
+      new_ctx.append(v)
+    return Context(*new_ctx)
+
+  def PullTypeVar(self, u: TypeVar) -> 'Context':
+    if not self.ContainsTypeVar(u):
+      raise Exception(f'Context {self} does not contain {u}')
+    new_ctx = []
+    for v in self.Dom():
+      if isinstance(v, TypeVar) and u == v:
+        continue
+      new_ctx.append(v)
+    return Context(*new_ctx)
+
   def ContainsFreeTypes(self, rho: TypeExpression):
     assert isinstance(rho, TypeExpression)
     return all(
         self.ContainsTypeVar(alpha.typ) for alpha in FreeTypeVars(rho)
     )
+
+  def OverlappingUnion(self, other: 'Context') -> 'Context':
+    assert self < other or other < self
+    if self < other:
+      return other
+    return self
 
 
 class Judgement:
@@ -832,7 +859,7 @@ class VarRule(DerivationRule):
 
 
 class WeakRule(DerivationRule):
-  def __init__(self, u: Union[TypeVar, Var], *premisses):
+  def __init__(self, u: Union[TypeVar, Var], *premisses: Sequence[Judgement]):
     if len(premisses) != 2:
       raise ValueError('Can only create WeakRule with 2 Judgements')
     super().__init__(*premisses)
@@ -889,32 +916,113 @@ class WeakRule(DerivationRule):
 
 
 class FormRule(DerivationRule):
-  def __init__(self, *premisses):
+  def __init__(self, *premisses: Sequence[Judgement]):
     if len(premisses) != 2:
       raise ValueError('Can only create WeakRule with 2 Judgements')
     super().__init__(*premisses)
     p_a, p_b = self.premisses
-    assert p_a.ctx < p_b.ctx or p_b.ctx < p_a.ctx
-    if p_a.ctx < p_b.ctx:
-      self.ctx = p_b.ctx
-    else:
-      self.ctx = p_a.ctx
+    self.ctx = p_a.ctx.OverlappingUnion(p_b.ctx)
     a = p_a.stmt.subj
     b = p_b.stmt.subj
-    if Sort(a) != Sort(b):
-      raise TypeError(
-          f'Both premisses in FormRule must be same sort {p_a} {p_b}'
-      )
     match a:
       case Kind():
+        if not isinstance(b, Kind):
+          raise TypeError(f'FormRule premiss mismatch: {p_a} vs. {p_b}')
         self.ab = KArrow(a, b)
       case Type():
+        if not isinstance(b, Type):
+          raise TypeError(f'FormRule premiss mismatch:{p_a} vs. {p_b}')
+        if not a.Proper() or not b.Proper():
+          raise TypeError(f'FormRule premisses must be proper types: {p_a} and {p_b}')
         self.ab = TypeExpression(TArrow(a, b))
       case _:
         raise NotImplementedError(f'Unexpected input to FormRule {p_a}')
 
   def Conclusion(self) -> Judgement:
     return Judgement(self.ctx, Statement(self.ab))
+
+
+class ApplRule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    super().__init__(*premisses)
+    if len(premisses) != 2:
+      raise ValueError('Can only create ApplRule with 2 Judgements')
+    p_mab, p_na = self.premisses
+    self.ctx = p_mab.ctx.OverlappingUnion(p_na.ctx)
+    match p_mab.stmt.subj:
+      case TypeExpression():
+        k_mab = p_mab.stmt.subj.kind
+        if not isinstance(k_mab, KArrow):
+          raise TypeError(f'Unexpected first premiss to ApplRule {p_mab}')
+        if not isinstance(p_na.stmt.subj, TypeExpression):
+          raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
+        if k_mab.arg != p_na.stmt.subj.kind:
+          raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
+      case Expression():
+        t_mab = p_mab.stmt.subj.Type()
+        if not isinstance(t_mab, TArrow):
+          raise TypeError(f'Unexpected first premiss to ApplRule {p_mab}')
+        if not isinstance(p_na.stmt.subj, Expression):
+          raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
+        if t_mab.arg != p_na.stmt.subj.Type():
+          raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
+      case _:
+        raise NotImplementedError(
+            f'Unexpected first premiss to ApplRule {p_mab}'
+        )
+  
+  def Conclusion(self):
+    p_fn, p_arg = self.premisses
+    fn = p_fn.stmt.subj
+    arg = p_arg.stmt.subj
+    match fn:
+      case TypeExpression():
+        subj = TypeExpression(TApply(fn, arg))
+      case Expression():
+        subj = Expression(Apply(fn, arg))
+    return Judgement(self.ctx, Statement(subj))
+
+
+class AbstRule(DerivationRule):
+  def __init__(self, arg: Union[TypeVar, Var], *premisses: Sequence[Judgement]):
+    super().__init__(*premisses)
+    if len(premisses) != 2:
+      raise ValueError('Can only create AbstRule with 2 Judgements')
+    p_xamb, p_abs = self.premisses
+    self.ctx = p_xamb.ctx.OverlappingUnion(p_abs.ctx)
+    match arg:
+      case TypeVar():
+        if not isinstance(p_xamb.stmt.subj, TypeExpression):
+          raise TypeError(f'Unexpected first premiss of AbstRule {p_xamb}')
+        k_abst = KArrow(arg.kind, p_xamb.stmt.subj.kind)
+        if not isinstance(p_abs.stmt.subj, Kind):
+          raise TypeError(f'Unexpected second premiss of AbstRule {p_abs}')
+        if k_abst != p_abs.stmt.subj:
+          raise TypeError(f'Mismatched second premiss of AbstRule {p_abs}')
+      case Var():
+        if not isinstance(p_xamb.stmt.subj, Expression):
+          raise TypeError(f'Unexpected first premiss of AbstRule {p_xamb}')
+        t_abst = TArrow(arg.typ, p_xamb.stmt.subj.Type())
+        if not isinstance(p_abs.stmt.subj, TypeExpression):
+          raise TypeError(f'Unexpected second premiss of AbstRule {p_abs}')
+        if not t_abst != p_abs.stmt.subj.Type():
+          raise TypeError(f'Mismatched second premiss of AbstRule {p_abs}')
+      case _:
+        raise NotImplementedError(f'Unexpected input to AbstRule {arg}')
+    self.arg = arg
+  
+  def Conclusion(self) -> Judgement:
+    p = self.premisses[0]
+    a = self.arg
+    body = p.stmt.subj
+    match body:
+      case TypeExpression():
+        subj = TypeExpression(TAbstract(a, body))
+        ctx = self.ctx.PullTypeVar(a)
+      case Expression():
+        subj = Expression(Abstract(a, body))
+        ctx = self.ctx.PullVar(a)
+    return Judgement(ctx, Statement(subj))
 
 
 class Derivation:
@@ -930,8 +1038,6 @@ class Derivation:
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
-    for p in rule.premisses:
-      assert p.ctx < self.ctx
     self.rules[-1].ctx = self.ctx
     concl = rule.Conclusion()
     self.ctx = concl.ctx
@@ -976,16 +1082,30 @@ class Derivation:
     concl = self._AddRule(VarRule(premiss, u))
     return concl
 
-  def WeakRule(self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement):
+  def WeakRule(
+      self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement
+  ) -> Judgement:
     assert p_ab in self.conclusions
     assert p_cs in self.conclusions
     assert p_ab.ctx < self.ctx and p_cs.ctx < self.ctx
     return self._AddRule(WeakRule(u, p_ab, p_cs))
 
-  def FormRule(self, p_a: Judgement, p_b: Judgement):
+  def FormRule(self, p_a: Judgement, p_b: Judgement) -> Judgement:
     assert p_a in self.conclusions
     assert p_b in self.conclusions
     return self._AddRule(FormRule(p_a, p_b))
+
+  def ApplRule(self, p_mab: Judgement, p_na: Judgement) -> Judgement:
+    assert p_mab in self.conclusions
+    assert p_na in self.conclusions
+    return self._AddRule(ApplRule(p_mab, p_na))
+
+  def AbstRule(
+      self, arg: Union[TypeVar, Var], p_xamb: Judgement, p_abs: Judgement
+  ) -> Judgement:
+    assert p_xamb in self.conclusions
+    assert p_abs in self.conclusions
+    return self._AddRule(AbstRule(arg, p_xamb, p_abs))
   
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str]
@@ -1001,9 +1121,17 @@ class Derivation:
         cs_key = keys[rule.premisses[1]]
         return f'(weak) on ({ab_key}) and ({cs_key})'
       case FormRule():
-        a_key = keys[rule.premisses[0]]
-        b_key = keys[rule.premisses[1]]
-        return f'(form) on ({a_key}) and ({b_key})'
+        as_key = keys[rule.premisses[0]]
+        bs_key = keys[rule.premisses[1]]
+        return f'(form) on ({as_key}) and ({bs_key})'
+      case ApplRule():
+        mab_key = keys[rule.premisses[0]]
+        na_key = keys[rule.premisses[1]]
+        return f'(appl) on ({mab_key}) and ({na_key})'
+      case AbstRule():
+        xamb_key = keys[rule.premisses[0]]
+        abs_key = keys[rule.premisses[1]]
+        return f'(abst) on ({xamb_key}) and ({abs_key})'
       case _:
         raise ValueError(f'Unexpected input to Justification {rule}')
 
