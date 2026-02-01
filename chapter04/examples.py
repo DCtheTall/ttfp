@@ -4,7 +4,20 @@ Chapter 4 Examples
 
 """
 
-from dependent_types_lambda_calculus import *
+from dependent_types_lambda_calculus import (
+    Context,
+    Derivation,
+    KArrow,
+    SortRule,
+    Star,
+    TAbstract,
+    TApply,
+    TArrow,
+    TypeExpression,
+    TypeVar,
+    Var,
+    VarRule,
+)
 
 
 def RunExamples():
