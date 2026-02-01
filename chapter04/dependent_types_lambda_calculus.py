@@ -72,7 +72,8 @@ class TypeVar(Type):
     self.kind = kind
 
   def __str__(self):
-    return f'{self.name}:{self.kind}'[:-2]
+    kind_str = str(self.kind)[:-2]
+    return f'{self.name}:{kind_str}'
 
   def __hash__(self):
     return hash(str(self))
@@ -132,9 +133,7 @@ class BoundTypeVar(TOccurrence):
       )
 
   def __str__(self):
-    name, *others = str(self.typ).split(':')
-    assert len(others) == 1
-    return name
+    return self.typ.name
 
   def BoundTo(self, bt: BindingTypeVar) -> bool:
     return self.bt == bt
@@ -142,15 +141,24 @@ class BoundTypeVar(TOccurrence):
 
 class TArrow(Type):
   def __init__(self, arg: Type, ret: Type):
+    assert ret.Proper()
+    assert arg.Proper()
+    self.kind = Star()
     self.arg = arg
     self.ret = ret
-    self.kind = Star()
 
   def __str__(self):
-    ret_str = str(self.ret)
-    if isinstance(self.ret, TArrow):
+    ret_t = self.RetType()
+    kind_str = str(ret_t.kind)
+    ret_str = str(ret_t)[:-(len(kind_str) - 4)]
+    if isinstance(ret_t, TArrow):
       ret_str = ret_str[1:-1]
-    return f'({self.arg} -> {ret_str}):{str(self.kind)[:-2]}'
+    return f'({self.arg} -> {ret_str})'
+
+  def RetType(self) -> Type:
+    if isinstance(self.ret, TypeExpression):
+      return self.ret.Type()
+    return self.ret
 
 
 class TAbstract(Type):
@@ -163,15 +171,24 @@ class TAbstract(Type):
       body.MaybeBindFreeTypesTo(arg)
 
   def __str__(self):
-    body = self.body
+    body = self.BodyType()
     args = str(self.arg)
     while isinstance(body, TAbstract):
       args = body._AppendMultiArgStr(args, body)
-      body = body.body_key
-    return f'(λ{args}.{body}):{self.kind}'[:-2]
+      body = body.BodyType()
+    body_kind = str(body.kind)[:-2]
+    body_str = str(body)
+    if body_str.endswith(body_kind):
+      body_str = body_str[:-(len(body_kind) + 1)]
+    return f'(λ{args}.{body_str}):{self.kind}'[:-2]
 
   def _AppendMultiArgStr(self, args_str, body) -> str:
     return args_str + f'.λ{body.arg}'
+
+  def BodyType(self) -> Type:
+    if isinstance(self.body, TypeExpression):
+      return self.body.Type()
+    return self.body
 
 
 class TApply(Type):
@@ -185,12 +202,23 @@ class TApply(Type):
     self.kind = fn.kind.ret
 
   def __str__(self):
-    fn = self.fn
-    fn_str = str(self.fn)
+    fn = self.FnType()
+    fn_kind = str(fn.kind)[:-2]
+    fn_str = str(fn)[:-(len(fn_kind) + 1)]
     if isinstance(fn, TApply):
-      fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
+      fn_str = fn_str[1:-1]
     arg = str(self.arg)
     return f'({fn_str} {arg}):{self.kind}'[:-2]
+
+  def FnType(self):
+    if isinstance(self.fn, TypeExpression):
+      return self.fn.Type()
+    return self.fn
+
+  def ArgType(self):
+    if isinstance(self.arg, TypeExpression):
+      return self.arg.Type()
+    return self.arg
 
 
 class TypeExpression(Type):
