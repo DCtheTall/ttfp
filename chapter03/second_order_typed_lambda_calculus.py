@@ -245,11 +245,13 @@ class FreeTypeVars(Multiset[TypeVar]):
       case TOccurrence():
         self.elems = []
       case Arrow():
-        self.elems = FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+        self.elems = (
+            FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+        )
       case PiType():
         self.elems = FreeTypeVars(T.typ.body).elems
       case _:
-        raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+        raise NotImplementedError(f'Unexpected input to FreeTypeVars {T}')
 
   def ContainsBindingVar(self, btv: BindingTypeVar):
     return self.Contains(btv.typ)
@@ -399,13 +401,17 @@ def SubstituteType(
         if not zs:
           raise Exception('Need more types for substitution')
         new_t = new_types.pop()
-        assert not TypeOccuresFree(B, new_t)
-        T = RenameTerm(T, T.typ.arg, new_t)
+        assert not FreeTypeVars(B).Contains(new_t)
+        T = RenameType(T, T.typ.arg, new_t)
       return ExpressionType(
-          PiType(T.typ.arg, SubstituteType(T.typ.body, a, B, new_types, binding))
+          PiType(
+              T.typ.arg, SubstituteType(T.typ.body, a, B, new_types, binding)
+          )
       )
     case _:
-      raise NotImplementedError(f'Unexpected term in type for SubstituteType {T}')
+      raise NotImplementedError(
+          f'Unexpected term in type for SubstituteType {T}'
+      )
 
 
 class Term:
@@ -1119,7 +1125,7 @@ def BetaReduce(
     new_vars: list[Var] = [],
     new_types: list[TypeVar] = [],
 ):
-  # In λ-> all terms are guaranteed to normalize.
+  # In λ2 all terms are guaranteed to normalize.
   while not M.BetaNormal():
     M = OneStepBetaReduce(M, new_vars, new_types)
   return M
@@ -1186,15 +1192,18 @@ class Context:
     self.typ_declarations = []
     self.declarations = []  # To preserve order for printing only
     for u in vars:
-      self.declarations.append(u)
       match u:
         case Var():
           for tv in FreeTypeVars(ExpressionType(u.typ)):
             if not self.ContainsVar(tv.typ):
               raise ValueError(f'Context {self} does not contain free types in {u}')
-          self.var_declarations.append(Declaration(u))
+          u = Declaration(u)
+          self.var_declarations.append(u)
+          self.declarations.append(u)
         case TypeVar():
-          self.typ_declarations.append(TypeDeclaration(u))
+          u = TypeDeclaration(u)
+          self.typ_declarations.append(u)
+          self.declarations.append(u)
         case _:
           raise NotImplementedError(f'Unexpected input to Context {u}')
 

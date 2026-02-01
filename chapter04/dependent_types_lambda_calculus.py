@@ -74,11 +74,16 @@ class TypeVar(Type):
   def __str__(self):
     return f'{self.name}:{self.kind}'[:-2]
 
+  def __hash__(self):
+    return hash(str(self))
+
   def __eq__(self, other):
     if isinstance(other, TypeExpression):
       other = other.Type()
     if isinstance(other, TOccurrence):
       other = other.typ
+    if not isinstance(other, TypeVar):
+      return False
     return (self.name, self.kind) == (other.name, other.kind)
 
 
@@ -137,8 +142,6 @@ class BoundTypeVar(TOccurrence):
 
 class TArrow(Type):
   def __init__(self, arg: Type, ret: Type):
-    assert arg.Proper()
-    assert ret.Proper()
     self.arg = arg
     self.ret = ret
     self.kind = Star()
@@ -223,6 +226,9 @@ class TypeExpression(Type):
   def __str__(self):
     return str(self.typ)
 
+  def __eq__(self, other):
+    return TAlphaEquiv(self, other)
+
   def Type(self) -> Type:
     typ = self.typ
     if isinstance(typ, TOccurrence):
@@ -256,7 +262,7 @@ class TypeExpression(Type):
   def Copy(self) -> 'TypeExpression':
     match self.typ:
       case FreeTypeVar() | BoundTypeVar():
-        return TypeExpression(self.typ.typ)
+        return TypeExpression(self.Type())
       case TArrow():
         return TypeExpression(TArrow(self.typ.arg.Copy(), self.typ.ret.Copy()))
       case TApply():
@@ -268,6 +274,9 @@ class TypeExpression(Type):
         raise NotImplementedError(
             f'Unexpected member of TypeExpression {self.typ}'
         )
+
+  def BetaNormal(self) -> bool:
+    return len(Redexes(self)) == 0
 
 
 class Multiset[T]:
@@ -300,15 +309,322 @@ class FreeTypeVars(Multiset[TypeVar]):
         self.elems = [T.typ]
       case TOccurrence():
         self.elems = []
-      case Arrow():
-        self.elems = FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+      case TArrow():
+        self.elems = (
+            FreeTypeVars(T.typ.arg).elems + FreeTypeVars(T.typ.ret).elems
+        )
       case TApply():
+        self.elems = (
+            FreeTypeVars(T.typ.fn).elems + FreeTypeVars(T.typ.arg).elems
+        )
+      case TAbstract():
         self.elems = FreeTypeVars(T.typ.body).elems
       case _:
-        raise NotImplementedError(f'Unexpected input to OccursFree {T}')
+        raise NotImplementedError(f'Unexpected input to FreeTypeVars {T.typ}')
 
   def ContainsBindingVar(self, btv: BindingTypeVar) -> bool:
     return self.Contains(btv.typ)
+
+
+class Redexes(Multiset[Union[Type, 'Term']]):
+  def __init__(self, M: Union[TypeExpression, Expression]):
+    match M:
+      case Expression():
+        match M.term:
+          case Occurrence():
+            self.elems = []
+          case Apply():
+            self.elems = []
+            if isinstance(M.term.FuncTerm(), Abstract):
+              self.elems.append(M.term)
+            self.elems.extend(Redexes(M.term.fn).elems)
+            self.elems.extend(Redexes(M.term.arg).elems)
+          case Abstract():
+            self.elems = Redexes(M.term.body).elems
+          case _:
+            raise NotImplementedError(f'Unexpected input to Redexes {M}')
+      case TypeExpression():
+        match M.typ:
+          case TOccurrence():
+            self.elems = []
+          case TArrow():
+            self.elems = Redexes(M.typ.arg).elems + Redexes(M.typ.ret).elems
+          case TApply():
+            self.elems = []
+            if isinstance(M.typ.fn.Type(), TAbstract):
+              self.elems.append(M.typ)
+            self.elems.extend(Redexes(M.typ.fn).elems)
+            self.elems.extend(Redexes(M.typ.arg).elems)
+          case TAbstract():
+            self.elems = Redexes(M.typ.body).elems
+          case _:
+            raise NotImplementedError(f'Unexpected input to Redexes {M}')
+      case _:
+        raise NotImplementedError(f'Unexpected input to Redexes {M}')
+
+
+def RenameType(
+    T: TypeExpression, x: Union[BindingTypeVar, TypeVar], y: TypeVar
+) -> TypeExpression:
+  def _HasBindingType(T: TypeExpression, x: TypeVar) -> bool:
+    match T.typ:
+      case TOccurrence():
+        return False
+      case TArrow():
+        return _HasBindingType(T.typ.arg, x) or _HasBindingType(T.typ.ret, x)
+      case TApply():
+        return _HasBindingType(T.typ.fn, x) or _HasBindingType(T.typ.arg, x)
+      case TAbstract():
+        if T.typ.arg.typ == x:
+          return True
+        return _HasBindingType(T.typ.body, x)
+      case _:
+        raise NotImplementedError(f'Unexpected input to HasBindingType {T}')
+
+  def _RenameBoundTypes(
+      T: TypeExpression, x: BindingTypeVar, y: BindingTypeVar
+  ) -> TypeExpression:
+    assert isinstance(x, BindingTypeVar) and isinstance(y, BindingTypeVar)
+    match T.typ:
+      case FreeTypeVar():
+        return T
+      case BoundTypeVar():
+        if T.typ.bt == x:
+          return TypeExpression(BoundTypeVar(y, FreeTypeVar(y.typ)))
+        return T
+      case TArrow():
+        return TypeExpression(
+            TArrow(
+                _RenameBoundTypes(T.typ.arg, x, y),
+                _RenameBoundTypes(T.typ.ret, x, y)
+            )
+        )
+      case TApply():
+        return TypeExpression(
+            TApply(
+                _RenameBoundTypes(T.typ.fn, x, y),
+                _RenameBoundTypes(T.typ.arg, x, y)
+            )
+        )
+      case TAbstract():
+        return TypeExpression(
+            TAbstract(T.typ.arg, _RenameBoundTypes(T.typ.body, x, y))
+        )
+      case _:
+        raise NotImplementedError(f'Unexpected input to RenameBoundTypes {T}')
+
+  match T.typ:
+    case FreeTypeVar():
+      if T.typ.typ == x:
+        return TypeExpression(y)
+      return TypeExpression(T.typ.typ)
+    case BoundTypeVar():
+      return T
+    case TArrow():
+      return TypeExpression(
+          TArrow(RenameType(T.typ.arg, x, y), RenameType(T.typ.ret, x, y))
+      )
+    case TApply():
+      return TypeExpression(
+          TApply(RenameType(T.typ.fn, x, y), RenameType(T.typ.arg, x, y))
+      )
+    case TAbstract():
+      if FreeTypeVars(T.typ.body).Contains(y):
+        raise RenameFreeTypeVarError(f'{y} occurs free in {T.typ}')
+      if _HasBindingType(T.typ.body, y):
+        raise RenameBindingTypeVarError(f'{y} is a binding type in {T.typ}')
+      arg_t = T.typ.arg
+      U = T.typ.body
+      if arg_t == x:
+        new_arg_t = BindingTypeVar(y)
+        U = _RenameBoundTypes(U, arg_t, new_arg_t)
+      else:
+        new_arg_t = arg_t
+      return TypeExpression(TAbstract(new_arg_t, RenameType(U, x, y)))
+    case _:
+      raise NotImplementedError(f'Unexpected input to RenameType {T}')
+
+
+def SubstituteType(
+    T: TypeExpression,
+    a: Union[BindingTypeVar, TypeVar],
+    B: TypeExpression,
+    new_types: list[TypeVar],
+    binding: Optional[BindingTypeVar] = None,
+) -> TypeExpression:
+  match T.typ:
+    case FreeTypeVar():
+      if T.typ == a:
+        return B
+      return T
+    case BoundTypeVar():
+      if binding is not None and T.typ.BoundTo(binding):
+        return B
+      return T
+    case TArrow():
+      return TypeExpression(
+          TArrow(
+              SubstituteType(T.typ.arg, a, B, new_types, binding),
+              SubstituteType(T.typ.ret, a, B, new_types, binding)
+          )
+      )
+    case TApply():
+      return TypeExpression(
+          TApply(
+              SubstituteType(T.typ.fn, a, B, new_types, binding),
+              SubstituteType(T.typ.arg, a, B, new_types, binding)
+          )
+      )
+    case TAbstract():
+      if FreeTypeVars(B).Contains(T.typ.arg.typ):
+        if not zs:
+          raise Exception('Need more types for substitution')
+        new_t = new_types.pop()
+        assert not FreeTypeVars(B).Contains(new_t)
+        T = RenameType(T, T.typ.arg, new_t)
+      return TypeExpression(
+          TAbstract(
+              T.typ.arg, SubstituteType(T.typ.body, a, B, new_types, binding)
+          )
+      )
+    case _:
+      raise NotImplementedError(
+          f'Unexpected term in type for SubstituteType {T}'
+      )
+
+
+def OneStepBetaReduceType(
+    T: TypeExpression,
+    new_types: list[TypeVar] = [],
+    applicative=False
+) -> TypeExpression:
+  match T.typ:
+    case TOccurrence():
+      return T
+    case TArrow():
+      if not T.typ.fn.BetaNormal():
+        return TypeExpression(
+            TArrow(
+                OneStepBetaReduceType(T.typ.fn, new_types, applicative),
+                T.typ.ret
+            )
+        )
+      return TypeExpression(
+          TArrow(
+              T.typ.fn,
+              OneStepBetaReduceType(T.typ.ret, new_types, applicative)
+          )
+      )
+    case TApply():
+      # Applicative order: evaluate innermost-leftmost redex first.
+      if applicative:
+        if not T.typ.fn.BetaNormal():
+          return TypeExpression(
+              TApply(
+                  OneStepBetaReduceType(T.typ.fn, new_types, applicative),
+                  T.typ.arg
+              )
+          )
+        if not T.typ.arg.BetaNormal():
+          return TypeExpression(
+              TApply(
+                  T.typ.fn,
+                  OneStepBetaReduceType(T.typ.arg, new_types, applicative)
+              )
+          )
+        if isinstance(T.typ.fn.Type(), TAbstract):
+          T, U = T.typ.fn, T.typ.arg
+          return SubstituteType(T.typ.body, T.typ.arg, U, new_types, T.typ.arg)
+        return T
+      # Normal order: evaluate outermost-leftmost redex first.
+      if isinstance(T.typ.fn.Type(), TAbstract):
+        T, U = T.typ.fn, T.typ.arg
+        return SubstituteType(T.typ.body, T.typ.arg, U, new_types, T.typ.arg)
+      if T.typ.fn.BetaNormal():
+        return TypeExpression(
+            TApply(
+                T.typ.fn,
+                OneStepBetaReduceType(T.typ.arg, new_types, applicative)
+            )
+        )
+      return TypeExpression(
+          TApply(
+              OneStepBetaReduceType(T.typ.fn, new_types, applicative),
+              T.typ.arg
+          )
+      )
+    case TAbstract():
+      return TypeExpression(
+          TAbstract(
+              T.typ.arg,
+              OneStepBetaReduceType(T.typ.body, new_types, applicative)
+          )
+      )
+    case _:
+      raise NotImplementedError(f'Unexpected input to OneStepBetaReduce {T}')
+
+
+def BetaReduceType(
+    T: TypeExpression,
+    new_types: list[TypeVar] = [],
+):
+  # In λ2 all types are guaranteed to normalize.
+  while not T.BetaNormal():
+    T  = OneStepBetaReduceType(T, new_types)
+  return T
+
+
+class DeBrujinIndices(dict[Union[TypeVar, 'Var'], int]):
+  def __str__(self):
+    return str({str(k): str(v) for k, v in self.items()})
+
+  def copy(self):
+    return DeBrujinIndices(super().copy())
+
+
+def TAlphaEquiv(
+    x: TypeExpression, y: TypeExpression,
+    de_brujin: Optional[DeBrujinIndices] = None
+) -> bool:
+  def _Helper(
+      x: TypeExpression, y: TypeExpression, de_brujin: DeBrujinIndices
+  ) -> bool:
+    match x.typ:
+      case FreeTypeVar():
+        return isinstance(y.typ, FreeTypeVar) and x.typ == y.typ
+      case BoundTypeVar():
+        if not isinstance(y.typ, BoundTypeVar):
+          return False
+        xt = x.Type()
+        yt = y.Type()
+        if xt in de_brujin and yt in de_brujin:
+          return de_brujin[xt] == de_brujin[yt]
+        if xt not in de_brujin and yt not in de_brujin:
+          return xt == yt
+        return False
+      case TArrow():
+        return (
+            isinstance(y.typ, TArrow)
+            and _Helper(x.typ.arg, y.typ.arg, de_brujin)
+            and _Helper(x.typ.ret, y.typ.ret, de_brujin)
+        )
+      case TApply():
+        return (
+            isinstance(y.typ, TApply)
+            and _Helper(x.typ.fn, y.typ.fn, de_brujin)
+            and _Helper(x.typ.arg, y.typ.arg, de_brujin)
+        )
+      case TAbstract():
+        if not isinstance(y.typ, TAbstract):
+          return False
+        xt = x.typ.arg
+        yt = y.typ.arg
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xt.typ] = new_de_brujin[yt.typ] = len(de_brujin)
+        return _Helper(x.typ.body, y.typ.body, new_de_brujin)
+      case _:
+        raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
+  return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 
 class Term:
@@ -324,8 +640,9 @@ class Term:
     if isinstance(typ, TOccurrence):
       typ = typ.typ
     assert (
-      isinstance(typ, TypeVar)
-      or isinstance(typ, TArrow)
+        isinstance(typ, TypeVar)
+        or isinstance(typ, TArrow)
+        or isinstance(typ, TApply)
     )
     return typ
 
@@ -339,8 +656,9 @@ class Var(Term):
 
   def __str__(self):
     line = f'{self.name}:{self.typ}'
-    kind_str = str(self.typ.kind)
-    return line[:len(kind_str)]
+    if line.endswith(':*'):
+      line = line[:-2]
+    return line
 
   def __hash__(self):
     return hash(str(self))
@@ -356,7 +674,7 @@ class Occurrence:
   def __init__(self, u: Var):
     assert isinstance(u, Var)
     self.var = u
-    self.typ = u.typ
+    self.typ = TypeExpression(u.typ)
 
   def __str__(self):
     return str(self.var)
@@ -381,6 +699,7 @@ class BindingVar(Occurrence):
     assert isinstance(u, Var)
     self.var = u
     self.typ = TypeExpression(u.typ)
+    self.var.typ = self.typ
 
   def __hash__(self):
     return id(self)
@@ -388,24 +707,24 @@ class BindingVar(Occurrence):
   def ShouldBind(self, fv: FreeVar) -> bool:
     return self.var == fv
 
+  def MaybeBindFreeTypesTo(self, btv: BindingTypeVar):
+    self.typ.MaybeBindFreeTypesTo(btv)
+
 
 class BoundVar(Occurrence):
   def __init__(self, bv: BindingVar, fv: FreeVar):
     self.bv = bv
     self.var = fv.var
     bv_typ = self.bv.typ
-    if isinstance(bv_typ, TypeExpression):
-      bv_typ = bv_typ.Type()
-    if bv_typ != self.var.Type():
+    if TypeExpression(bv_typ) != TypeExpression(self.var.typ):
       raise TypeError(
           f'Cannot bind variable with type {bv_typ} '
           f'to variable with type {self.var.typ}'
       )
-    self.typ = fv.typ
+    self.typ = TypeExpression(fv.typ)
 
   def __str__(self):
-    # Bound variables omit types.
-    return str(self.var).split(':')[0]
+    return str(self.var)
 
   def BoundTo(self, bv: BindingVar) -> bool:
     return self.bv == bv
@@ -547,9 +866,7 @@ class Expression(Term):
       case BindingVar():
         raise Exception('Should not store BindingVar in Expression')
       case Occurrence():
-        if btv.ShouldBind(self.term.typ.typ):
-          self.typ.MaybeBindFreeTypesTo(btv)
-          self.SetType(self.typ)
+        pass
       case Apply():
         self.term.fn.MaybeBindFreeTypesTo(btv)
         self.term.arg.MaybeBindFreeTypesTo(btv)
@@ -573,6 +890,38 @@ class Expression(Term):
         raise NotImplementedError(
             f'Unexpected member of Expression {self.term}'
         )
+  
+  def ReplaceType(
+      self, old_t: TypeExpression, new_t: TypeExpression,
+      binder_map: Optional[dict[BindingVar, BindingVar]] = None
+  ) -> 'Expression':
+    if binder_map is None:
+      binder_map = {}
+    match self.term:
+      case FreeVar() | BoundVar():
+        if TypeExpression(self.typ) != old_t:
+          return self
+        u = self.term.var
+        u = Var(u.name, new_t)
+        if isinstance(self.term, FreeVar) or self.term.bv not in binder_map:
+          return Expression(FreeVar(u))
+        return Expression(BoundVar(binder_map[self.term.bv], FreeVar(u)))
+      case Apply():
+        return Expression(
+            Apply(
+                self.term.fn.ReplaceType(old_t, new_t, binder_map),
+                self.term.arg.ReplaceType(old_t, new_t, binder_map)
+            )
+        )
+      case Abstract():
+        u = self.term.arg.var
+        if self.term.arg.typ == old_t:
+          u = Var(u.name, new_t)
+          u = binder_map[self.term.arg] = BindingVar(u)
+        return Expression(
+            Abstract(u, self.term.body.ReplaceType(old_t, new_t, binder_map))
+        )
+    return self
 
 
 class Statement:
@@ -658,23 +1007,30 @@ class Context:
     self.var_declarations = []
     self.str_declarations = []  # To preserve order for printing only
     for u in args:
-      u_str = str(u)
-      if u_str != str(Star()):
-        self.str_declarations.append(u_str)
       match u:
         case Kind():
-          self.kind_declarations.append(KindDeclaration(u))
+          u = KindDeclaration(u)
+          self.kind_declarations.append(u)
+          self.str_declarations.append(u)
         case TypeVar():
           if u.kind != Star() and not self.ContainsKind(u.kind):
             raise ValueError(f'Context {self} does not contain kinds in {u}')
-          self.typ_declarations.append(TypeDeclaration(u))
+          u = TypeDeclaration(u)
+          self.typ_declarations.append(u)
+          self.str_declarations.append(u)
         case Var():
           for tv in FreeTypeVars(TypeExpression(u.typ)):
             if not self.ContainsTypeVar(tv.typ):
               raise ValueError(f'Context {self} does not contain free types in {u}')
-          self.var_declarations.append(VarDeclaration(u))
+          u = VarDeclaration(u)
+          self.var_declarations.append(u)
+          self.str_declarations.append(u)
         case _:
           raise NotImplementedError(f'Unexpected input to Context {u}')
+    for u in self.var_declarations:
+      for v in self.typ_declarations:
+        u.subj.MaybeBindFreeTypesTo(v.subj)
+    self.str_declarations = list(map(str, self.str_declarations))
   
   def __str__(self):
     if not self.str_declarations:
@@ -839,7 +1195,7 @@ class VarRule(DerivationRule):
           raise ValueError(
               f'Cannot create VarRule for {u} with premiss {premiss}'
           )
-        if premiss.stmt.subj.typ != u.typ:
+        if TypeExpression(premiss.stmt.subj) != TypeExpression(u.typ):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
@@ -1025,6 +1381,37 @@ class AbstRule(DerivationRule):
     return Judgement(ctx, Statement(subj))
 
 
+class ConvRule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    super().__init__(*premisses)
+    if len(premisses) != 2:
+      raise ValueError('Can only create ConvRule with 2 Judgements')
+    p_ab, p_bs = self.premisses
+    self.ctx = p_ab.ctx.OverlappingUnion(p_bs.ctx)
+    if not isinstance(p_ab.stmt.subj, Expression):
+      raise TypeError(f'Unexpected first premiss for ConvRule {p_ab}')
+    if not isinstance(p_bs.stmt.subj, TypeExpression):
+      raise TypeError(f'Unexpected second premiss for ConvRule {p_bs}')
+    if not p_bs.stmt.subj.Type().Proper():
+      raise TypeError(
+          f'Second premiss for ConvRule should be proper type {p_bs}'
+      )
+    p_ab_t = p_ab.stmt.subj.typ
+    if p_ab_t.kind != p_ab.stmt.subj.typ.kind:
+      raise TypeError(f'Mismatched kind in ConvRule {p_ab} {p_bs}')
+    if BetaReduceType(p_ab_t) != TypeExpression(p_bs.stmt.subj):
+      raise TypeError(
+          f'First premiss type must β-reduce to second {p_ab} {p_bs}'
+      )
+
+  def Conclusion(self) -> Judgement:
+    p_ab, p_bs = self.premisses
+    subj = p_ab.stmt.subj.ReplaceType(
+        TypeExpression(p_ab.stmt.subj.typ), TypeExpression(p_bs.stmt.subj)
+    )
+    return Judgement(self.ctx, Statement(subj))
+
+
 class Derivation:
   def __init__(self, ctx: Context):
     # All derivations in this system start with (sort).
@@ -1044,14 +1431,12 @@ class Derivation:
     self.conclusions.append(concl)
     return concl
 
-  def _PremissForType(self, typ: TypeVar):
-    for i, rule in enumerate(self.rules):
-      if (
-          isinstance(rule, VarRule)
-          and isinstance(rule.u, TypeVar)
-          and rule.u == typ
-      ):
-        return self.conclusions[i]
+  def _PremissForType(self, typ: Type):
+    for concl in self.conclusions:
+      if not isinstance(concl.stmt.subj, TypeExpression):
+        continue
+      if TypeExpression(typ) == TypeExpression(concl.stmt.subj):
+        return concl
     raise TypeError(f'{typ} is not declared')
 
   def VarRule(self, u: Union[TypeVar, Var]) -> Judgement:
@@ -1106,6 +1491,11 @@ class Derivation:
     assert p_xamb in self.conclusions
     assert p_abs in self.conclusions
     return self._AddRule(AbstRule(arg, p_xamb, p_abs))
+
+  def ConvRule(self, p_ab: Judgement, p_bs: Judgement) -> Judgement:
+    assert p_ab in self.conclusions
+    assert p_bs in self.conclusions
+    return self._AddRule(ConvRule(p_ab, p_bs))
   
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str]
@@ -1132,6 +1522,10 @@ class Derivation:
         xamb_key = keys[rule.premisses[0]]
         abs_key = keys[rule.premisses[1]]
         return f'(abst) on ({xamb_key}) and ({abs_key})'
+      case ConvRule():
+        ab_key = keys[rule.premisses[0]]
+        bs_key = keys[rule.premisses[1]]
+        return f'(conv) on ({ab_key}) and ({bs_key})'
       case _:
         raise ValueError(f'Unexpected input to Justification {rule}')
 
