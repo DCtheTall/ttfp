@@ -1585,13 +1585,18 @@ class Derivation:
         case SortRule():
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case VarRule():
+          if isinstance(concl.stmt.subj, TypeExpression):
+            decl = concl.stmt.subj.Type()
+          else:
+            assert isinstance(concl.stmt.subj, Expression)
+            decl = concl.stmt.subj.term.var
           seperator = (
               ' ' * len(f'({key}) ')
               + '| ' * indent_count
               + '|'
-              + '-' * (len(str(concl.stmt)) + 3)
+              + '-' * (len(str(decl)) + 3)
           )
-          line = f'{' ' * (len(key) + 2)} {indent}| {concl.stmt} |'
+          line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
           result.extend([seperator, line, seperator])
           indent_count += 1
           indent = '| ' * indent_count
