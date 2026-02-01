@@ -102,18 +102,18 @@ def RunExamples():
 
   print('\nExamples from 4.5')
   deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
   ii = deriv.VarRule(beta)
+  i = deriv.VarRule(alpha)
   iii = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
   iv = deriv.FormRule(i, i)
   v = deriv.AbstRule(alpha, iv, iii)
   vi = deriv.ApplRule(v, ii)
-  print(deriv.LinearFormat())
+  print(deriv.FlagFormat())
 
-  print('\nExamples from 4.7')
+  print('\nExample from 4.7')
   deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
   ii = deriv.VarRule(beta)
+  i = deriv.VarRule(alpha)
   iii = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
   iv = deriv.FormRule(i, i)
   v = deriv.AbstRule(alpha, iv, iii)
@@ -122,7 +122,7 @@ def RunExamples():
   vii = deriv.VarRule(x)
   viii = deriv.FormRule(ii, ii)
   ix = deriv.ConvRule(vii, viii)
-  print(deriv.LinearFormat())
+  print(deriv.FlagFormat())
 
 
 if __name__ == '__main__':
