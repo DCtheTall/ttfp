@@ -1444,9 +1444,9 @@ class Derivation:
   def __init__(self, ctx: Context):
     # All derivations in this system start with (sort).
     self.ctx = ctx
-    sort_rule = SortRule(ctx)
-    self.rules: list[DerivationRule] = [sort_rule]
-    self.conclusions: list[Judgement] = [sort_rule.Conclusion()]
+    self.rules: list[DerivationRule] = []
+    self.conclusions: list[Judgement] = []
+    self.SortRule()
 
   def SortRulePremiss(self) -> Judgement:
     return self.conclusions[0]
@@ -1467,6 +1467,13 @@ class Derivation:
         return concl
     raise TypeError(f'{typ} is not declared')
 
+  def SortRule(self) -> Judgement:
+    sort_rule = SortRule(self.ctx)
+    self.rules.append(sort_rule)
+    concl = sort_rule.Conclusion()
+    self.conclusions.append(concl)
+    return concl
+
   def VarRule(self, u: Union[TypeVar, Var]) -> Judgement:
     premiss = None
     for i, rule in enumerate(self.rules):
@@ -1474,13 +1481,13 @@ class Derivation:
         continue
       match (u, rule.u):
         case (TypeVar(), TypeVar()):
-          if rule.u == u:
+          if rule.u == u and self.ctx.ContainsTypeVar(u):
             return self.conclusions[i]
-          assert u.kind == Star()
         case (TypeVar(), _):
+          assert u.kind == Star()
           premiss = self.SortRulePremiss()
         case (Var(), Var()):
-          if rule.u == u:
+          if rule.u == u and self.ctx.ContainsVar(u):
             return self.conclusions[i]
           premiss = self._PremissForType(u.Type())
         case (Var(), _):
@@ -1489,11 +1496,9 @@ class Derivation:
           raise NotImplementedError(f'Unexpected input to VarRule {u}')
     if premiss is None:
       assert isinstance(u, TypeVar), type(u)
-      assert u.kind == Star()
+      assert u.Proper()
       if not isinstance(self.rules[-1], SortRule):
-        sort_rule = SortRule(self.ctx)
-        self.rules.append(sort_rule)
-        self.conclusions.append(sort_rule.Conclusion())
+        self.SortRule()
       premiss = self.conclusions[-1]
     concl = self._AddRule(VarRule(premiss, u))
     return concl
@@ -1610,3 +1615,49 @@ class Derivation:
       result.append(line)
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
+
+
+def DeriveKind(jdgmnt: Judgement) -> Derivation:
+  if not isinstance(jdgmnt.stmt.subj, Kind):
+    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+  d = Derivation(jdgmnt.ctx)
+  def _Helper(kind: Kind):
+    match kind:
+      case Star():
+        if len(d.rules) == 1:
+          return d.conclusions[0]
+        return d.SortRule()
+      case KArrow():
+        p_arg = _Helper(kind.arg)
+        p_ret = _Helper(kind.ret)
+        return d.FormRule(p_arg, p_ret)
+      case _:
+        raise NotImplementedError(f'Unexpected subject in judgement {jdgmnt}')
+  _Helper(jdgmnt.stmt.subj)
+  assert d.ctx == jdgmnt.ctx
+  return d
+
+
+def DeriveType(jdgmnt: Judgement) -> Derivation:
+  if not isinstance(jdgmnt.stmt.subj, TypeExpression):
+    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+  d = DeriveKind(Judgement(Context(), Statement(jdgmnt.stmt.subj.kind)))
+  def _Helper(T: TypeExpression):
+    match T.typ:
+      case FreeTypeVar():
+        return d.VarRule(T.Type())
+      case BoundTypeVar():
+        raise ValueError(f'Should not need rule for bound type {T.typ}')
+      case TArrow():
+        p_arg = _Helper(T.typ.arg)
+        p_ret = _Helper(T.typ.ret)
+        return d.FormRule(p_arg, p_ret)
+      case TApply():
+        # TODO
+        pass
+      case TAbstract():
+        # TODO
+        pass
+  _Helper(TypeExpression(jdgmnt.stmt.subj))
+  assert d.ctx == jdgmnt.ctx
+  return d
