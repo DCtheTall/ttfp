@@ -1728,7 +1728,9 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
     match T.typ:
       case FreeTypeVar():
         if not d.ContainsKind(T.kind):
-          d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.typ.kind))))
+          d.AppendRules(
+              DeriveKind(Judgement(Context(), Statement(T.typ.kind)))
+          )
         return d.VarRule(T.Type())
       case BoundTypeVar():
         raise ValueError(f'Should not need rule for bound type {T.typ}')
@@ -1739,7 +1741,9 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
       case TAbstract():
         if not d.ctx.ContainsTypeVar(T.typ.arg.typ):
           if not d.ContainsKind(T.typ.arg.typ.kind):
-            d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.typ.arg.typ.kind))))
+            d.AppendRules(
+                DeriveKind(Judgement(Context(), Statement(T.typ.arg.typ.kind)))
+            )
           d.VarRule(T.typ.arg.typ)
         if T.Proper():
           d.SortRule()
@@ -1777,11 +1781,11 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
                 DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
             )
           d.VarRule(M.term.arg.var)
-        p_t = d.PremissForType(TypeExpression(M.term.body.Type()))
+        p_t = d.PremissForType(TypeExpression(M.Type()))
         if p_t is None:
           ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
           d.AppendRules(
-              DeriveType(Judgement(Context(*ctx_types), Statement(M.term.body.typ)))
+              DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
           )
           p_t = d.conclusions[-1]
         return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)), p_t)

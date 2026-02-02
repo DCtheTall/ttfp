@@ -117,7 +117,20 @@ def RunExercises():
   nat = TypeVar('nat', Star())
   jdgmnt = Judgement(
       Context(nat),
-      Statement(TypeExpression(TApply(TApply(TAbstract(alpha, TAbstract(beta, TApply(beta, TApply(beta, alpha)))), nat), TAbstract(gamma, gamma))))
+      Statement(
+          TypeExpression(
+              TApply(
+                  TApply(
+                      TAbstract(
+                          alpha,
+                          TAbstract(beta, TApply(beta, TApply(beta, alpha)))
+                      ),
+                      nat
+                  ),
+                  TAbstract(gamma, gamma)
+              )
+          )
+      )
   )
   line = str(jdgmnt)
   print(line)
