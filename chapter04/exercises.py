@@ -45,7 +45,22 @@ def RunExercises():
   print('-' * len(line))
   deriv = DeriveTerm(jdgmnt)
   print(deriv.FlagFormat())
-  # TODO 4.3b
+  
+  print('\nExercise 4.3b')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', Star())
+  x = Var('x', alpha)
+  y = Var('y', TArrow(alpha, beta))
+  z = Var('z', TArrow(beta, alpha))
+  jdgmnt = Judgement(
+      Context(alpha, beta, x, y, z),
+      Statement(Expression(Apply(z, Apply(y, x))))
+  )
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveTerm(jdgmnt)
+  print(deriv.FlagFormat())
 
   
   print('\nExercise 4.4a')

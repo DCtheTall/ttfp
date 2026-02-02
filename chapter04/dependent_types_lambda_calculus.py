@@ -1627,6 +1627,19 @@ class Derivation:
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
 
+  def _PremissForVarIdx(self, u: Union[TypeVar, Var]):
+    for i, rule in enumerate(self.rules):
+      if not isinstance(rule, VarRule):
+        continue
+      match (u, rule.u):
+        case (TypeVar(), TypeVar()):
+          if u == rule.u:
+            return i
+        case (Var(), Var()):
+          if u == rule.u:
+            return i
+    raise ValueError(f'{u} not declared')
+
   def AppendRules(self, other: 'Derivation'):
     premiss_map: dict[str, int] = {}
     def _LookupPremiss(premiss: Judgement):
@@ -1639,6 +1652,19 @@ class Derivation:
         case VarRule():
           p = rule.premisses[0]
           p = _LookupPremiss(p)
+          if isinstance(rule.u, TypeVar):
+            if self.ctx.ContainsTypeVar(rule.u):
+              premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
+                  rule.u
+              )
+              continue
+          else:
+            assert isinstance(rule.u, Var)
+            if self.ctx.ContainsVar(rule.u):
+              premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
+                  rule.u
+              )
+              continue
           self._AddRule(VarRule(p, rule.u))
         case WeakRule():
           p1, p2 = rule.premisses
@@ -1719,7 +1745,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
   def _Helper(M: Expression):
     match M.term:
       case FreeVar():
-        if d.PremissForType(M.typ) is None:
+        if d.PremissForType(TypeExpression(M.typ)) is None:
           ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
           d.AppendRules(DeriveType(Judgement(Context(*ctx_types), Statement(M.typ))))
         return d.VarRule(M.term.var)
