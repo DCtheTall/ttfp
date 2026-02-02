@@ -149,8 +149,10 @@ class TArrow(Type):
 
   def __str__(self):
     ret_t = self.RetType()
-    kind_str = str(ret_t.kind)
-    ret_str = str(ret_t)[:-(len(kind_str) - 4)]
+    ret_str = str(ret_t)
+    kind_str = str(ret_t.kind)[:-2]
+    if ret_str.endswith(kind_str):
+      ret_str = ret_str[:-(len(kind_str) + 1)]
     if isinstance(ret_t, TArrow):
       ret_str = ret_str[1:-1]
     return f'({self.arg} -> {ret_str})'
@@ -809,7 +811,7 @@ class Abstract(Term):
     self.body = body
     if isinstance(arg, BindingVar):
       body.MaybeBindFreeVarsTo(arg)
-    self.typ = Arrow(self.arg.typ, self.body.typ)
+    self.typ = TArrow(self.arg.typ, self.body.typ)
     assert self.typ.Proper()
 
   def __str__(self):
@@ -818,6 +820,7 @@ class Abstract(Term):
     while isinstance(body, Abstract):
       args = body._AppendMultiArgStr(args, body)
       body = body.BodyTerm()
+    typ = str(self.typ)
     return f'(λ{args}.{body}):{self.typ}'
 
   def BodyTerm(self) -> Term:
@@ -1492,7 +1495,10 @@ class Derivation:
             premiss = self.conclusions[i]
         else:
           assert isinstance(u, Var)
-          if isinstance(rule.ab, TypeExpression) and rule.ab == TypeExpression(u.Type()):
+          if (
+              isinstance(rule.ab, TypeExpression)
+              and rule.ab == TypeExpression(u.Type())
+          ):
             premiss = self.conclusions[i]
       if isinstance(rule, VarRule):
         match (u, rule.u):
@@ -1543,6 +1549,12 @@ class Derivation:
     assert p_ab in self.conclusions
     assert p_bs in self.conclusions
     return self._AddRule(ConvRule(p_ab, p_bs))
+
+  def ContainsKind(self, kind) -> bool:
+    for concl in self.conclusions:
+      if isinstance(concl.stmt.subj, Kind) and concl.stmt.subj == kind:
+        return True
+    return False
   
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str]
@@ -1700,9 +1712,7 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
           return d.conclusions[-1]
         return d.SortRule()
       case KArrow():
-        p_arg = _Helper(kind.arg)
-        p_ret = _Helper(kind.ret)
-        return d.FormRule(p_arg, p_ret)
+        return d.FormRule(_Helper(kind.arg), _Helper(kind.ret))
       case _:
         raise NotImplementedError(f'Unexpected subject in judgement {jdgmnt}')
   _Helper(jdgmnt.stmt.subj)
@@ -1717,22 +1727,26 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
   def _Helper(T: TypeExpression):
     match T.typ:
       case FreeTypeVar():
-        if not T.Type().Proper():
+        if not d.ContainsKind(T.kind):
           d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.typ.kind))))
         return d.VarRule(T.Type())
       case BoundTypeVar():
         raise ValueError(f'Should not need rule for bound type {T.typ}')
       case TArrow():
-        p_arg = _Helper(T.typ.arg)
-        p_ret = _Helper(T.typ.ret)
-        return d.FormRule(p_arg, p_ret)
+        return d.FormRule(_Helper(T.typ.arg), _Helper(T.typ.ret))
       case TApply():
-        p_fn = _Helper(T.typ.fn)
-        p_arg = _Helper(T.typ.arg)
-        return d.ApplRule(p_fn, p_arg)
+        return d.ApplRule(_Helper(T.typ.fn), _Helper(T.typ.arg))
       case TAbstract():
-        # TODO
-        pass
+        if not d.ctx.ContainsTypeVar(T.typ.arg.typ):
+          if not d.ContainsKind(T.typ.arg.typ.kind):
+            d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.typ.arg.typ.kind))))
+          d.VarRule(T.typ.arg.typ)
+        if T.Proper():
+          d.SortRule()
+        else:
+          d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.kind))))
+        p_t = d.conclusions[-1]
+        return d.AbstRule(T.typ.arg.typ, _Helper(TypeExpression(T.typ.body)), p_t)
   _Helper(TypeExpression(jdgmnt.stmt.subj))
   assert d.ctx == jdgmnt.ctx
   return d
@@ -1747,17 +1761,30 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case FreeVar():
         if d.PremissForType(TypeExpression(M.typ)) is None:
           ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-          d.AppendRules(DeriveType(Judgement(Context(*ctx_types), Statement(M.typ))))
+          d.AppendRules(
+              DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
+          )
         return d.VarRule(M.term.var)
       case BoundVar():
         raise ValueError(f'Should not need rule for bound var {M.term}')
       case Apply():
-        p_fn = _Helper(M.term.fn)
-        p_arg = _Helper(M.term.arg)
-        return d.ApplRule(p_fn, p_arg)
+        return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
       case Abstract():
-        # TODO
-        pass
+        if not d.ctx.ContainsVar(M.term.arg.var):
+          if d.PremissForType(TypeExpression(M.term.arg.typ)) is None:
+            ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+            d.AppendRules(
+                DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
+            )
+          d.VarRule(M.term.arg.var)
+        p_t = d.PremissForType(TypeExpression(M.term.body.Type()))
+        if p_t is None:
+          ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+          d.AppendRules(
+              DeriveType(Judgement(Context(*ctx_types), Statement(M.term.body.typ)))
+          )
+          p_t = d.conclusions[-1]
+        return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)), p_t)
   _Helper(Expression(jdgmnt.stmt.subj))
   assert d.ctx == jdgmnt.ctx
   return d

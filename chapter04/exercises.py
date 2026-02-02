@@ -70,11 +70,60 @@ def RunExercises():
       Context(alpha, beta),
       Statement(TypeExpression(TApply(beta, TApply(beta, alpha))))
   )
+  line = str(jdgmnt)
   print(line)
   print('-' * len(line))
   deriv = DeriveType(jdgmnt)
   print(deriv.FlagFormat())
-  # TODO rest
+  
+  print('Exercise 4.4b')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', KArrow(Star(), Star()))
+  bba = TypeExpression(TApply(beta, TApply(beta, alpha)))
+  x = Var('x', bba)
+  y = Var('y', alpha)
+  jdgmnt = Judgement(
+      Context(alpha, beta, x), Statement(Expression(Abstract(y, x)))
+  )
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveTerm(jdgmnt)
+  print(deriv.FlagFormat())
+
+  print('Exercise 4.4c')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', KArrow(Star(), Star()))
+  jdgmnt = Judgement(
+      Context(),
+      Statement(
+          TypeExpression(
+              TAbstract(
+                  alpha, TAbstract(beta, TApply(beta, TApply(beta, alpha)))
+              )
+          )
+      )
+  )
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveType(jdgmnt)
+  print(deriv.FlagFormat())
+
+  print('Exercise 4.4d')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', KArrow(Star(), Star()))
+  gamma = TypeVar('γ', Star())
+  nat = TypeVar('nat', Star())
+  jdgmnt = Judgement(
+      Context(nat),
+      Statement(TypeExpression(TApply(TApply(TAbstract(alpha, TAbstract(beta, TApply(beta, TApply(beta, alpha)))), nat), TAbstract(gamma, gamma))))
+  )
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveType(jdgmnt)
+  print(deriv.FlagFormat())
 
 
 if __name__ == '__main__':
