@@ -755,7 +755,7 @@ class BoundVar(Occurrence):
     self.typ = TypeExpression(fv.typ)
 
   def __str__(self):
-    return str(self.var)
+    return self.var.name
 
   def BoundTo(self, bv: BindingVar) -> bool:
     return self.bv == bv
@@ -783,9 +783,9 @@ class Apply(Term):
   def __init__(self, fn: Term, arg: Term):
     self.fn = fn
     self.arg = arg
-    if not isinstance(fn.Type(), Arrow):
+    if not isinstance(fn.Type(), TArrow):
       raise TypeError(f'Left term of Apply must be Arrow type {fn.typ}')
-    if fn.Type().arg != arg.Type():
+    if fn.Type().arg.Type() != arg.Type():
       raise TypeError(f'Mismatched types {fn} got {arg}')
     self.typ = self.fn.Type().ret
     assert self.typ.Proper()
@@ -798,7 +798,7 @@ class Apply(Term):
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
     arg = str(self.arg)
-    if ':' in arg and not self._ShouldDisplayArgType():
+    if ':' in arg:
       arg = ':'.join(arg.split(':')[:-1])
     return f'({fn_str} {arg}):{self.typ}'
 
@@ -1064,7 +1064,7 @@ class Context:
   def __str__(self):
     if not self.str_declarations:
       return 'Ø'
-    return ', '.join([d for d in self.str_declarations])
+    return ', '.join([str(d) for d in self.str_declarations])
 
   # Overload for subcontext, A < B returns if A is a subcontext of B
   def __lt__(self, other):
@@ -1212,7 +1212,7 @@ class SortRule(DerivationRule):
 class VarRule(DerivationRule):
   def __init__(self, premiss: Judgement, u: Union[TypeVar, Var]):
     super().__init__(premiss)
-    self.ctx = premiss.ctx
+    self.ctx = ctx = premiss.ctx
     match u:
       case TypeVar():
         if self.ctx.ContainsTypeVar(u):
@@ -1357,7 +1357,7 @@ class ApplRule(DerivationRule):
           raise TypeError(f'Unexpected first premiss to ApplRule {p_mab}')
         if not isinstance(p_na.stmt.subj, Expression):
           raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
-        if t_mab.arg != p_na.stmt.subj.Type():
+        if t_mab.arg.Type() != p_na.stmt.subj.Type():
           raise TypeError(f'Unexpected second premiss to ApplRule {p_na}')
       case _:
         raise NotImplementedError(
@@ -1468,13 +1468,13 @@ class Derivation:
     self.conclusions.append(concl)
     return concl
 
-  def _PremissForType(self, typ: Type):
+  def PremissForType(self, typ: Type):
     for concl in self.conclusions:
       if not isinstance(concl.stmt.subj, TypeExpression):
         continue
       if TypeExpression(typ) == TypeExpression(concl.stmt.subj):
         return concl
-    raise TypeError(f'{typ} is not declared')
+    return None
 
   def SortRule(self) -> Judgement:
     sort_rule = SortRule(self.ctx)
@@ -1504,7 +1504,8 @@ class Derivation:
               return self.conclusions[i]
     if isinstance(u, Var):
       assert u.Type().Proper()
-      premiss = self._PremissForType(u.Type())
+      premiss = self.PremissForType(u.Type())
+      assert premiss is not None
     if premiss is None:
       assert isinstance(u, TypeVar), type(u)
       assert u.Proper(), u
@@ -1633,7 +1634,8 @@ class Derivation:
     for rule in other.rules:
       match rule:
         case SortRule():
-          self._AddRule(SortRule(self.ctx))
+          premiss_map[str(rule.Conclusion())] = 0
+          continue
         case VarRule():
           p = rule.premisses[0]
           p = _LookupPremiss(p)
@@ -1668,8 +1670,8 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
   def _Helper(kind: Kind):
     match kind:
       case Star():
-        if len(d.rules) == 1:
-          return d.conclusions[0]
+        if isinstance(d.rules[-1], SortRule):
+          return d.conclusions[-1]
         return d.SortRule()
       case KArrow():
         p_arg = _Helper(kind.arg)
@@ -1706,5 +1708,30 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
         # TODO
         pass
   _Helper(TypeExpression(jdgmnt.stmt.subj))
+  assert d.ctx == jdgmnt.ctx
+  return d
+
+
+def DeriveTerm(jdgmnt: Judgement) -> Derivation:
+  if not isinstance(jdgmnt.stmt.subj, Expression):
+    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+  d = Derivation(Context())
+  def _Helper(M: Expression):
+    match M.term:
+      case FreeVar():
+        if d.PremissForType(M.typ) is None:
+          ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+          d.AppendRules(DeriveType(Judgement(Context(*ctx_types), Statement(M.typ))))
+        return d.VarRule(M.term.var)
+      case BoundVar():
+        raise ValueError(f'Should not need rule for bound var {M.term}')
+      case Apply():
+        p_fn = _Helper(M.term.fn)
+        p_arg = _Helper(M.term.arg)
+        return d.ApplRule(p_fn, p_arg)
+      case Abstract():
+        # TODO
+        pass
+  _Helper(Expression(jdgmnt.stmt.subj))
   assert d.ctx == jdgmnt.ctx
   return d

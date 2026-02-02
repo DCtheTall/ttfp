@@ -32,7 +32,20 @@ def RunExercises():
   print(deriv.FlagFormat())
 
   
-  # TODO 4.3
+  print('\nExercise 4.3a')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', Star())
+  x = Var('x', alpha)
+  y = Var('y', TArrow(alpha, beta))
+  jdgmnt = Judgement(
+      Context(alpha, beta, x, y), Statement(Expression(Apply(y, x)))
+  )
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveTerm(jdgmnt)
+  print(deriv.FlagFormat())
+  # TODO 4.3b
 
   
   print('\nExercise 4.4a')
@@ -42,8 +55,11 @@ def RunExercises():
       Context(alpha, beta),
       Statement(TypeExpression(TApply(beta, TApply(beta, alpha))))
   )
+  print(line)
+  print('-' * len(line))
   deriv = DeriveType(jdgmnt)
   print(deriv.FlagFormat())
+  # TODO rest
 
 
 if __name__ == '__main__':
