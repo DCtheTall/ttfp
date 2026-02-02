@@ -31,6 +31,20 @@ def RunExercises():
   deriv = DeriveType(jdgmnt)
   print(deriv.FlagFormat())
 
+  
+  # TODO 4.3
+
+  
+  print('\nExercise 4.4a')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', KArrow(Star(), Star()))
+  jdgmnt = Judgement(
+      Context(alpha, beta),
+      Statement(TypeExpression(TApply(beta, TApply(beta, alpha))))
+  )
+  deriv = DeriveType(jdgmnt)
+  print(deriv.FlagFormat())
+
 
 if __name__ == '__main__':
   RunExercises()
