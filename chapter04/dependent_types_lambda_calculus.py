@@ -155,7 +155,11 @@ class TArrow(Type):
       ret_str = ret_str[:-(len(kind_str) + 1)]
     if isinstance(ret_t, TArrow):
       ret_str = ret_str[1:-1]
-    return f'({self.arg} -> {ret_str})'
+    arg = str(self.arg)
+    kind_str = str(self.arg.kind)[:-2]
+    if arg.endswith(kind_str):
+      arg = arg[:-(len(kind_str) + 1)]
+    return f'({arg} -> {ret_str})'
 
   def RetType(self) -> Type:
     if isinstance(self.ret, TypeExpression):
@@ -607,6 +611,11 @@ def BetaReduceType(
   return T
 
 
+def TBetaEquiv(a: TypeExpression, b: TypeExpression) -> bool:
+  return BetaReduceType(a) == BetaReduceType(b)
+
+
+
 class DeBrujinIndices(dict[Union[TypeVar, 'Var'], int]):
   def __str__(self):
     return str({str(k): str(v) for k, v in self.items()})
@@ -952,9 +961,12 @@ class Expression(Term):
         if self.term.arg.typ == old_t:
           u = Var(u.name, new_t)
           u = binder_map[self.term.arg] = BindingVar(u)
-        return Expression(
+        M = Expression(
             Abstract(u, self.term.body.ReplaceType(old_t, new_t, binder_map))
         )
+        if M.typ == old_t:
+          M.SetType(new_t)
+        return M
     return self
 
 
@@ -1439,9 +1451,9 @@ class ConvRule(DerivationRule):
     p_ab_t = p_ab.stmt.subj.typ
     if p_ab_t.kind != p_ab.stmt.subj.typ.kind:
       raise TypeError(f'Mismatched kind in ConvRule {p_ab} {p_bs}')
-    if BetaReduceType(p_ab_t) != TypeExpression(p_bs.stmt.subj):
+    if not TBetaEquiv(TypeExpression(p_ab_t), TypeExpression(p_bs.stmt.subj)):
       raise TypeError(
-          f'First premiss type must β-reduce to second {p_ab} {p_bs}'
+          f'Premisses must be β-equivalent {p_ab_t} {p_bs}'
       )
 
   def Conclusion(self) -> Judgement:
@@ -1761,6 +1773,21 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
   d = Derivation(Context())
   def _Helper(M: Expression):
+    # Currently assumes β-normal form is in context.
+    # Does not support when the context has the unreduced form.
+    if not M.term.typ.BetaNormal():
+      t = BetaReduceType(TypeExpression(M.typ))
+      N = M.Copy()
+      N.SetType(t)
+      _Helper(N)
+      p1 = d.conclusions[-1]
+      ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+      d.AppendRules(
+          DeriveType(Judgement(Context(*ctx_types), Statement(M.term.typ)))
+      )
+      p2 = d.conclusions[-1]
+      d.ConvRule(p1, p2)
+      return
     match M.term:
       case FreeVar():
         if d.PremissForType(TypeExpression(M.typ)) is None:
@@ -1774,6 +1801,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case Apply():
         return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
       case Abstract():
+        p_body = _Helper(Expression(M.term.body))
         if not d.ctx.ContainsVar(M.term.arg.var):
           if d.PremissForType(TypeExpression(M.term.arg.typ)) is None:
             ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
@@ -1788,7 +1816,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
               DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
           )
           p_t = d.conclusions[-1]
-        return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)), p_t)
+        return d.AbstRule(M.term.arg.var, p_body, p_t)
   _Helper(Expression(jdgmnt.stmt.subj))
   assert d.ctx == jdgmnt.ctx
   return d

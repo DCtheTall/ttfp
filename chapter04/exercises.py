@@ -4,7 +4,25 @@ Chapter 4 Exercises
 
 """
 
-from dependent_types_lambda_calculus import *
+from dependent_types_lambda_calculus import (
+    Abstract,
+    Apply,
+    Context,
+    DeriveKind,
+    DeriveType,
+    DeriveTerm,
+    Expression,
+    Judgement,
+    KArrow,
+    Star,
+    Statement,
+    TAbstract,
+    TApply,
+    TArrow,
+    TypeExpression,
+    TypeVar,
+    Var,
+)
 
 
 def RunExercises():
@@ -136,6 +154,21 @@ def RunExercises():
   print(line)
   print('-' * len(line))
   deriv = DeriveType(jdgmnt)
+  print(deriv.FlagFormat())
+
+
+  print('\nExercise 4.5')
+  alpha = TypeVar('α', Star())
+  beta = TypeVar('β', Star())
+  x = Var('x', alpha)
+  y = Var('y', alpha)
+  M = Expression(Abstract(y, x))
+  M.SetType(TypeExpression(TApply(TAbstract(beta, TArrow(beta, beta)), alpha)))
+  jdgmnt = Judgement(Context(alpha, x), Statement(M))
+  line = str(jdgmnt)
+  print(line)
+  print('-' * len(line))
+  deriv = DeriveTerm(jdgmnt)
   print(deriv.FlagFormat())
 
 
