@@ -1,0 +1,9 @@
+Examples from 5.1
+Indexed sets: S:(nat -> *)
+(λn:nat.(S n)):(nat -> *)
+Vectors of length n: V:(nat -> *)
+(λn:nat.(V n)):(nat -> *)
+Proposition for each number n: P:(nat -> *)
+(λn:nat.(P n)):(nat -> *)
+((λn:nat.(V n)) 3:nat):*
+((λn:nat.(P n)) 3:nat):*

@@ -709,7 +709,7 @@ class Var(Term):
     if isinstance(other, Occurrence):
       other = other.var
     assert isinstance(other, Var)
-    return self.name == other.name and self.Type() == other.Type()
+    return self.name == other.name and self.typ == other.typ
 
 
 class Occurrence:
@@ -1786,8 +1786,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
           DeriveType(Judgement(Context(*ctx_types), Statement(M.term.typ)))
       )
       p2 = d.conclusions[-1]
-      d.ConvRule(p1, p2)
-      return
+      return d.ConvRule(p1, p2)
     match M.term:
       case FreeVar():
         if d.PremissForType(TypeExpression(M.typ)) is None:
