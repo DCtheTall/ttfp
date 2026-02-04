@@ -990,16 +990,6 @@ class Statement:
     return str(self.subj)
 
 
-class KindDeclaration:
-  def __init__(self, subj_k: Kind):
-    if not isinstance(subj_k, Kind):
-      raise ValueError(f'Cannot create KindDeclaration with {subj_k}')
-    self.subj = subj_k
-
-  def __str__(self):
-    return str(self.subj)
-
-
 class TypeDeclaration:
   def __init__(self, subj_t: TypeVar):
     if not isinstance(subj_t, TypeVar):
@@ -1027,15 +1017,10 @@ class VarDeclaration:
 
 
 class Domain(Multiset[Union[Var, TypeVar]]):
-    def __init__(self, kinds: list[Kind], types: list[TypeVar], vars: list[Var]):
-      self.kinds = Multiset(kinds)
+    def __init__(self, types: list[TypeVar], vars: list[Var]):
       self.vars = Multiset(vars)
       self.types = Multiset(types)
-      self.elems = self.kinds.elems + self.types.elems + self.vars.elems
-
-    def ContainsKind(self, u: Kind) -> bool:
-      assert isinstance(u, Kind)
-      return self.kinds.Contains(u)
+      self.elems = self.types.elems + self.vars.elems
 
     def ContainsTypeVar(self, u: TypeVar) -> bool:
       assert isinstance(u, TypeVar)
@@ -1048,16 +1033,11 @@ class Domain(Multiset[Union[Var, TypeVar]]):
 
 class Context:
   def __init__(self, *args: list[Union[Kind, TypeVar, Var]]):
-    self.kind_declarations = []
     self.typ_declarations = []
     self.var_declarations = []
     self.str_declarations = []  # To preserve order for printing only
     for u in args:
       match u:
-        case Kind():
-          u = KindDeclaration(u)
-          self.kind_declarations.append(u)
-          self.str_declarations.append(u)
         case TypeVar():
           u = TypeDeclaration(u)
           self.typ_declarations.append(u)
@@ -1083,9 +1063,6 @@ class Context:
 
   # Overload for subcontext, A < B returns if A is a subcontext of B
   def __lt__(self, other):
-    for u in self.kind_declarations:
-      if not any(u.subj == v.subj for v in other.kind_declarations):
-        return False
     for u in self.typ_declarations:
       if not any(u.subj.typ == v.subj.typ for v in other.typ_declarations):
         return False
@@ -1109,9 +1086,6 @@ class Context:
     for decl in self.var_declarations:
       sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
 
-  def ContainsKind(self, kind: Kind) -> bool:
-    return self.Dom().ContainsKind(kind)
-
   def ContainsTypeVar(self, typ: TypeVar) -> bool:
     return self.Dom().ContainsTypeVar(typ)
 
@@ -1120,7 +1094,6 @@ class Context:
 
   def Dom(self) -> Domain:
     return Domain(
-        [decl.subj for decl in self.kind_declarations],
         [decl.subj.typ for decl in self.typ_declarations],
         [decl.subj.var for decl in self.var_declarations]
     )
