@@ -262,10 +262,9 @@ class TypeExpression(Type):
     self.typ.kind = self.kind
 
   def __eq__(self, other):
-    # TODO α-equivalence.
-    if isinstance(other, TypeExpression):
-      other = other.typ
-    return self.typ == other
+    if not isinstance(other, TypeExpression):
+      return self.typ == other
+    return TAlphaEquiv(self, other)
 
   def __str__(self):
     return str(self.typ)
@@ -317,11 +316,11 @@ class Var(Term):
     self.typ = typ
 
   def __str__(self):
-    line = f'{self.name}:{self.typ}'
+    term = f'{self.name}:{self.typ}'
     k_str = str(self.typ.kind)[:-2]
-    if line.endswith(k_str):
-      line = line[:-len(k_str) - 1]
-    return line
+    if term.endswith(k_str):
+      term = term[:-len(k_str) - 1]
+    return term
 
   def __hash__(self):
     return hash(str(self))
@@ -398,7 +397,7 @@ class Apply(Term):
     self.arg = arg
     if not isinstance(fn.Type(), PiType):
       raise TypeError(f'Left term of Apply must be Π-type {fn.typ}')
-    if fn.Type().arg.Type() != arg.Type():
+    if fn.Type().arg.typ != arg.typ:
       raise TypeError(f'Mismatched types {fn} got {arg}')
     self.typ = self.fn.Type()
 
@@ -410,9 +409,14 @@ class Apply(Term):
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
     arg = str(self.arg)
-    if ':' in arg:
-      arg = ':'.join(arg.split(':')[:-1])
-    return f'({fn_str} {arg}):{self.typ}'
+    k_arg = str(self.arg.typ.kind)[:-2]
+    if arg.endswith(k_arg):
+      arg = arg[:-len(k_arg)-1]
+    typ = str(self.typ)
+    k_typ = str(self.typ.kind)[:-2]
+    if typ.endswith(k_typ):
+      typ = typ[:-len(k_typ)-1]
+    return f'({fn_str} {arg}):{typ}'
 
 
 class Abstract(Term):
@@ -454,7 +458,7 @@ class Expression(Term):
       case FreeVar() | BoundVar():
         self.term = term
       case Apply():
-        self.term = Apply(EXpression(term.fn), Expression(term.arg))
+        self.term = Apply(Expression(term.fn), Expression(term.arg))
       case Abstract():
         bv = term.arg
         if not isinstance(bv, BindingVar):
@@ -492,6 +496,10 @@ class Expression(Term):
         self.term.arg.typ.MaybeBindFreeVarsTo(bv)
         self.term.body.MaybeBindFreeVarsTo(bv)
     self.typ.MaybeBindFreeVarsTo(bv)
+
+  def ReplaceType(self, typ: Type):
+    # TODO
+    pass
 
 
 class Multiset[T]:
@@ -555,3 +563,85 @@ class FreeVars(Multiset[Var]):
         self._FindTypeFreeVars(M.term.arg.typ)
         self.elems = FreeVars(M.term.body).elems
     self.elems += FreeVars(M.typ)
+
+
+class DeBrujinIndices(dict[Union[Var], int]):
+  def __str__(self):
+    return str({str(k): str(v) for k, v in self.items()})
+
+  def copy(self):
+    return DeBrujinIndices(super().copy())
+
+
+def TAlphaEquiv(
+    x: TypeExpression, y: TypeExpression,
+    de_brujin: Optional[DeBrujinIndices] = None
+) -> bool:
+  def _Helper(
+      x: TypeExpression, y: TypeExpression, de_brujin: DeBrujinIndices
+  ) -> bool:
+    match x.typ:
+      case TypeVar():
+        return x.typ == y.typ
+      case PiType() | TAbstract():
+        if not isinstance(y.typ, type(x.typ)):
+          return False
+        xu = x.typ.arg
+        yu = y.typ.arg
+        if xu.typ != yu.typ:
+          return False
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
+        return _Helper(x.typ.body, y.typ.body, new_de_brujin)
+      case TApply():
+        return (
+            isinstance(y.typ, TApply)
+            and _Helper(x.typ.fn, y.typ.fn, de_brujin)
+            and AlphaEquiv(x.typ.arg, y.typ.arg, de_brujin)
+        )
+      case _:
+        raise NotImplementedError(f'Unexpected input to TAlphaEquiv {x}')
+  return _Helper(x, y, de_brujin or DeBrujinIndices())
+
+
+def AlphaEquiv(
+    x: Expression, y: Expression,
+    de_brujin: Optional[DeBrujinIndices] = None
+) -> bool:
+  def _Helper(
+      x: TypeExpression, y: TypeExpression, de_brujin: DeBrujinIndices
+  ) -> bool:
+    match x.term:
+      case FreeVar():
+        return isinstance(y.term, FreeVar) and x.term == y.term
+      case BoundVar():
+        if not isinstance(y.term, BoundVar):
+          return False
+        xu = x.term.var
+        yu = y.term.var
+        if xu.typ != yu.typ:
+          return False
+        if xu in de_brujin and yu in de_brujin:
+          return de_brujin[xu] == de_brujin[yu]
+        if xu not in de_brujin and yu not in de_brujin:
+          return xu == yu
+        return False
+      case Apply():
+        return (
+            isinstance(y.term, Apply)
+            and _Helper(x.term.fn, y.term.fn, de_brujin)
+            and _Helper(x.term.arg, y.term.arg, de_brujin)
+        )
+      case Abstract():
+        if not isinstance(y.term, Abstract):
+          return False
+        xu = x.term.arg
+        yu = y.term.arg
+        if xu.typ != yu.typ:
+          return False
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
+        return _Helper(x.term.body, y.term.body, new_de_brujin)
+      case _:
+        raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
+  return _Helper(x, y, de_brujin or DeBrujinIndices())
