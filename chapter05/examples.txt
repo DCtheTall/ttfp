@@ -7,4 +7,20 @@ Proposition for each number n: P:(nat -> *)
 (λn:nat.(P n)):(nat -> *)
 ((λn:nat.(V n)) 3:nat):*
 ((λn:nat.(P n)) 3:nat):*
-((λx:α.α) ((λx:α.x):(α -> α) z:α):(α -> α)):* =α ((λy:α.α) ((λy:α.y):(α -> α) z:α):(α -> α)):*: True
+
+Examples from 5.2
+Sort rule:
+Ø |- *:□
+Var rule for type:
+Ø |- *:□
+--------
+α:* |- α:*
+Var rule for term:
+α:* |- α:*
+----------
+α:*, x:α |- x:α
+Weak rule:
+Form rule:
+Appl rule:
+Abst rule:
+Conv rule:

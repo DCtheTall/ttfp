@@ -1045,7 +1045,9 @@ class Context:
         case Var():
           for tv in FreeTypeVars(TypeExpression(u.typ)):
             if not self.ContainsTypeVar(tv.typ):
-              raise ValueError(f'Context {self} does not contain free types in {u}')
+              raise ValueError(
+                  f'Context {self} does not contain free types in {u}'
+              )
           u = VarDeclaration(u)
           self.var_declarations.append(u)
           self.str_declarations.append(u)
@@ -1077,8 +1079,6 @@ class Context:
     return self < other and other < self
 
   def BindStatementFreeVars(self, sttmt: Statement):
-    if isinstance(sttmt.subj, Kind):
-      return
     for decl in self.typ_declarations:
       sttmt.subj.MaybeBindFreeTypesTo(decl.subj)
     if isinstance(sttmt.subj, TypeExpression):

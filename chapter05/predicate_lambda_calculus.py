@@ -25,6 +25,8 @@ class Star(Kind):
     return '*:' + str(AllKinds())
 
   def __eq__(self, other):
+    if isinstance(other, KindExpression):
+      other = other.kind
     return isinstance(other, Star)
 
 
@@ -34,6 +36,13 @@ class PiKind(Kind):
     self.body = body
     if isinstance(self.arg, BindingVar):
       self.body.MaybeBindFreeVarsTo(self.arg)
+
+  def __eq__(self, other):
+    if isinstance(other, KindExpression):
+      other = other.kind
+    if not isinstance(other, PiType):
+      return False
+    return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
     if (
@@ -83,12 +92,17 @@ class KindExpression(Kind):
   def __str__(self):
     return str(self.kind)
 
+  def __eq__(self, other):
+    if not isinstance(other, KindExpression):
+      return self.kind == other
+    raise KAlphaEquiv(self, other)
+
   def Copy(self) -> 'KindExpression':
     match self.kind:
       case Star():
         return KindExpression(Star())
       case PiKind():
-        bv = self.kind.arg
+        bv = BindingVar(self.kind.arg)
         return KindExpression(PiKind(bv.var, self.kind.body.Copy()))
       case _:
         raise NotImplementedError(
@@ -138,9 +152,9 @@ class PiType(Type):
   def __init__(self, arg: Union[Var, BindingVar], body: Type):
     self.arg = arg
     self.body = body
+    self.kind = Star()
     if isinstance(self.arg, BindingVar):
       self.body.MaybeBindFreeVarsTo(self.arg)
-    self.kind = Star()
 
   def __eq__(self, other):
     if isinstance(other, TypeExpression):
@@ -189,6 +203,13 @@ class TAbstract(Type):
       self.body.MaybeBindFreeVarsTo(self.arg)
     self.kind = PiKind(arg, body.kind)
 
+  def __eq__(self, other):
+    if isinstance(other, TypeExpression):
+      other = other.typ
+    if not isinstance(other, TAbstract):
+      return False
+    return (self.arg, self.body) == (other.arg, other.body)
+
   def __str__(self):
     body = self.BodyType()
     args = str(self.arg)
@@ -216,6 +237,13 @@ class TApply(Type):
     self.fn = fn
     self.arg = arg
     self.kind = self.fn.Kind().body
+
+  def __eq__(self, other):
+    if isinstance(other, TypeExpression):
+      return self == other.typ
+    if not isinstance(other, TApply):
+      return False
+    return (self.fn, self.arg) == (other.fn, other.arg)
 
   def __str__(self):
     fn = self.FnType()
@@ -274,8 +302,8 @@ class TypeExpression(Type):
       case TypeVar():
         return TypeExpression(self.typ)
       case PiType():
-        bv = self.typ.arg
-        return TypeExpression(PiType(bv.var, self.typ.body.Copy()))
+        bv = BindingVar(self.typ.arg)
+        return TypeExpression(PiType(bv, self.typ.body.Copy()))
       case TAbstract():
         bv = self.typ.arg
         return TypeExpression(TAbstract(bv.var, self.typ.body.Copy()))
@@ -291,9 +319,11 @@ class TypeExpression(Type):
       case PiType() | TAbstract():
         self.typ.arg.typ.MaybeBindFreeVarsTo(bv)
         self.typ.body.MaybeBindFreeVarsTo(bv)
+        # print('A', self.typ, bv)
       case TApply():
         self.typ.fn.MaybeBindFreeVarsTo(bv)
         self.typ.arg.MaybeBindFreeVarsTo(bv)
+        # print('B', self.typ, bv)
     self.kind.MaybeBindFreeVarsTo(bv)
 
 
@@ -355,6 +385,10 @@ class FreeVar(Occurrence):
 
 class BindingVar(Occurrence):
   def __init__(self, u: Var):
+    if isinstance(u, BindingVar):
+      self.var = u.var
+      self.typ = u.typ
+      return
     assert isinstance(u, Var)
     self.var = u
     self.typ = TypeExpression(u.typ)
@@ -368,7 +402,7 @@ class BindingVar(Occurrence):
     return id(self)
 
   def ShouldBind(self, fv: FreeVar) -> bool:
-    return self.var == fv
+    return self.var == fv.var
 
 
 class BoundVar(Occurrence):
@@ -401,6 +435,13 @@ class Apply(Term):
       raise TypeError(f'Mismatched types {fn} got {arg}')
     self.typ = self.fn.Type()
 
+  def __eq__(self, other):
+    if isinstance(other, Expression):
+      return self == other.term
+    if not isinstance(other, Apply):
+      return False
+    return (self.fn, self.arg) == (other.fn, other.arg)
+
   def __str__(self):
     fn = self.fn
     if isinstance(fn, Expression):
@@ -426,6 +467,13 @@ class Abstract(Term):
     if isinstance(arg, BindingVar):
       body.MaybeBindFreeVarsTo(arg)
     self.typ = PiType(self.arg, self.body.typ)
+
+  def __eq__(self, other):
+    if isinstance(other, Expression):
+      return self == other.term
+    if not isinstance(other, Abstract):
+      return False
+    return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
     body = self.BodyTerm()
@@ -470,6 +518,11 @@ class Expression(Term):
 
   def __str__(self):
     return str(self.term)
+
+  def __eq__(self, other):
+    if not isinstance(other, Expression):
+      return self.term == other
+    return AlphaEquiv(self, other)
 
   def Copy(self):
     match self.term:
@@ -541,27 +594,27 @@ class FreeVars(Multiset[Var]):
   def _FindKindFreeVars(self, K: KindExpression):
     assert isinstance(K, KindExpression)
     if isinstance(K.kind, PiKind):
-      self.elems = FreeVars(K.kind.arg.typ).elems + FreeVars(K.kind.body).elems
+      self.elems += FreeVars(K.kind.arg.typ).elems + FreeVars(K.kind.body).elems
 
   def _FindTypeFreeVars(self, T: TypeExpression):
     assert isinstance(T, TypeExpression)
     match T.typ:
       case PiType() | TAbstract():
-        self.elems = FreeVars(T.typ.arg.typ).elems + FreeVars(T.typ.body).elems
+        self.elems += FreeVars(T.typ.arg.typ).elems + FreeVars(T.typ.body).elems
       case TApply():
-        self.elems = FreeVars(T.typ.fn).elems + FreeVars(T.typ.arg).elems
+        self.elems += FreeVars(T.typ.fn).elems + FreeVars(T.typ.arg).elems
     self.elems += FreeVars(T.typ.kind).elems
 
   def _FindTermFreeVars(self, M: Expression):
     assert isinstance(M, Expression)
     match M.term:
       case FreeVar():
-        self.elems = [M.term.var]
+        self.elems += [M.term.var]
       case Apply():
-        self.elems = FreeVars(M.term.fn).elems +  FreeVars(M.term.arg).elems
+        self.elems += FreeVars(M.term.fn).elems +  FreeVars(M.term.arg).elems
       case Abstract():
         self._FindTypeFreeVars(M.term.arg.typ)
-        self.elems = FreeVars(M.term.body).elems
+        self.elems += FreeVars(M.term.body).elems
     self.elems += FreeVars(M.typ)
 
 
@@ -571,6 +624,27 @@ class DeBrujinIndices(dict[Union[Var], int]):
 
   def copy(self):
     return DeBrujinIndices(super().copy())
+
+
+def KAlphaEquiv(
+    x: KindExpression, y: KindExpression,
+    de_brujin: Optional[DeBrujinIndices] = None
+) -> bool:
+  def _Helper(x: KindExpression, y: KindExpression, de_brujin: DeBrujinIndices) -> bool:
+    match x.kind:
+      case Star():
+        return x.kind == y.kind
+      case PiKind():
+        if not isinstance(y.term, Abstract):
+          return False
+        xu = x.kind.arg
+        yu = y.kind.arg
+        if not TAlphaEquiv(xu.typ, yu.typ, de_brujin):
+          return False
+        new_de_brujin = de_brujin.copy()
+        new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
+        return _Helper(x.kind.body, y.kind.body, new_de_brujin)
+  return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 
 def TAlphaEquiv(
@@ -588,7 +662,7 @@ def TAlphaEquiv(
           return False
         xu = x.typ.arg
         yu = y.typ.arg
-        if xu.typ != yu.typ:
+        if not TAlphaEquiv(xu.typ, yu.typ, de_brujin):
           return False
         new_de_brujin = de_brujin.copy()
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
@@ -619,7 +693,7 @@ def AlphaEquiv(
           return False
         xu = x.term.var
         yu = y.term.var
-        if xu.typ != yu.typ:
+        if not TAlphaEquiv(xu.typ, yu.typ, de_brujin):
           return False
         if xu in de_brujin and yu in de_brujin:
           return de_brujin[xu] == de_brujin[yu]
@@ -637,7 +711,7 @@ def AlphaEquiv(
           return False
         xu = x.term.arg
         yu = y.term.arg
-        if xu.typ != yu.typ:
+        if not TAlphaEquiv(xu.typ, yu.typ, de_brujin):
           return False
         new_de_brujin = de_brujin.copy()
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
@@ -645,3 +719,264 @@ def AlphaEquiv(
       case _:
         raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
   return _Helper(x, y, de_brujin or DeBrujinIndices())
+
+
+class TypeDeclaration:
+  def __init__(self, subj_t: TypeVar):
+    if not isinstance(subj_t, TypeVar):
+      raise ValueError(f'Cannot create TypeDeclaration with {subj_t}')
+    self.subj = TypeExpression(subj_t)
+
+  def Type(self) -> Type:
+    return self.subj.typ
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class VarDeclaration:
+  def __init__(self, subj: Var):
+    if not isinstance(subj, Var):
+      raise ValueError(f'Cannot create VarDeclaration with {subj}')
+    self.subj = BindingVar(subj)
+
+  def Var(self) -> Var:
+    return self.subj.var
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Domain(Multiset[Union[Var, TypeVar]]):
+    def __init__(self, types: list[TypeVar], vars: list[Var]):
+      self.vars = Multiset(vars)
+      self.types = Multiset(types)
+      self.elems = self.types.elems + self.vars.elems
+
+    def ContainsTypeVar(self, u: TypeVar) -> bool:
+      assert isinstance(u, TypeVar)
+      return self.types.Contains(u)
+
+    def ContainsVar(self, u: Var) -> bool:
+      assert isinstance(u, Var)
+      return self.vars.Contains(u)
+
+
+class Domain(Multiset[Union[Var, TypeVar]]):
+    def __init__(self, types: list[TypeVar], vars: list[Var]):
+      self.vars = Multiset(vars)
+      self.types = Multiset(types)
+      self.elems = self.types.elems + self.vars.elems
+
+    def ContainsTypeVar(self, u: TypeVar) -> bool:
+      assert isinstance(u, TypeVar)
+      return self.types.Contains(u)
+
+    def ContainsVar(self, u: Var) -> bool:
+      assert isinstance(u, Var)
+      return self.vars.Contains(u)
+
+
+class Context:
+  def __init__(self, *args: list[Union[Kind, TypeVar, Var]]):
+    self.typ_declarations = []
+    self.var_declarations = []
+    self.str_declarations = []  # To preserve order for printing only
+    for u in args:
+      match u:
+        case TypeVar():
+          for fv in FreeVars(u.kind):
+            if not self.ContainsVar(fv):
+              raise ValueError(
+                  f'Context {self} does not contain free vars in kind of {u}'
+              )
+          u = TypeDeclaration(u)
+          self.typ_declarations.append(u)
+          self.str_declarations.append(u)
+        case Var():
+          # Check for free variables in the type.
+          for fv in FreeVars(Expression(u).typ):
+            if not self.ContainsVar(fv):
+              raise ValueError(
+                  f'Context {self} does not contain free vars in type of {u}'
+              )
+          u = VarDeclaration(u)
+          self.var_declarations.append(u)
+          self.str_declarations.append(u)
+        case _:
+          raise NotImplementedError(f'Unexpected input to Context {u}')
+    for u in self.typ_declarations:
+      for v in self.var_declarations:
+        u.subj.MaybeBindFreeVarsTo(v.subj)
+    self.str_declarations = list(map(str, self.str_declarations))
+  
+  def __str__(self):
+    if not self.str_declarations:
+      return 'Ø'
+    return ', '.join([str(d) for d in self.str_declarations])
+
+  # Overload for subcontext, A < B returns if A is a subcontext of B
+  def __lt__(self, other):
+    for u in self.typ_declarations:
+      if not any(u.subj.typ == v.subj.typ for v in other.typ_declarations):
+        return False
+    for u in self.var_declarations:
+      if not any(u.subj.var == v.subj.var for v in other.var_declarations):
+        return False
+    return True
+
+  def __eq__(self, other):
+    if not isinstance(other, Context):
+      return False
+    return self < other and other < self
+
+  def ContainsTypeVar(self, u: TypeVar):
+    assert isinstance(u, TypeVar)
+    return self.Dom().ContainsTypeVar(u)
+
+  def ContainsVar(self, u: Var):
+    assert isinstance(u, Var)
+    return self.Dom().ContainsVar(u)
+
+  def Dom(self) -> Domain:
+    return Domain(
+        [decl.subj.typ for decl in self.typ_declarations],
+        [decl.subj.var for decl in self.var_declarations]
+    )
+
+  def BindStatementFreeVars(self, sttmt: Statement):
+    if isinstance(sttmt.subj, TypeExpression):
+      return
+    for decl in self.var_declarations:
+      sttmt.subj.typ.MaybeBindFreeVarsTo(decl.subj)
+
+  def PushTypeVar(self, u: TypeVar) -> 'Context':
+    assert isinstance(u, TypeVar)
+    if self.ContainsTypeVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    return Context(*self.Dom(), u)
+
+  def PushVar(self, u: Var):
+    assert isinstance(u, Var)
+    if self.ContainsVar(u):
+      raise Exception(f'Context {self} contains {u}')
+    if not self.ContainsFreeVars(TypeExpression(u.typ)):
+      raise TypeError(
+          f'Context {self} does not contain free type variables in {u.typ}'
+      )
+    return Context(*self.Dom(), u)
+
+  def ContainsFreeVars(self, rho: TypeExpression):
+    assert isinstance(rho, TypeExpression)
+    return all(
+        self.ContainsVar(u) for u in FreeVars(rho)
+    )
+
+
+class Statement:
+  subj: Union[Kind, TypeExpression, Expression]
+  typ: Union[TypeExpression, Kind, AllKinds]
+
+  def __init__(self, subj: Union[Kind, TypeExpression, Expression]):
+    self.subj = subj
+    match subj:
+      case Kind():
+        self.typ = AllKinds()
+      case TypeExpression():
+        self.typ = subj.kind
+      case Expression():
+        self.typ = subj.typ
+      case _:
+        raise NotImplementedError(f'Unexpected input to Statement {subj}')
+
+  def __str__(self):
+    return str(self.subj)
+
+
+class Judgement:
+  def __init__(self, ctx: Context, stmt: Statement):
+    self.ctx = ctx
+    self.stmt = stmt
+    self.ctx.BindStatementFreeVars(stmt)
+
+  def __str__(self):
+    return f'{self.ctx} |- {self.stmt}'
+
+
+class DerivationRule:
+  ctx: Context
+  premisses: list[Judgement]
+
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if premisses:
+      ctx = premisses[0].ctx
+      for pmiss in premisses:
+        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+          raise ValueError(
+              'Cannot use different Contexts in premisses of '
+              f'the same DerivationRule: {ctx} != {pmiss.ctx}'
+          )
+    self.premisses = list(premisses)
+  
+  def Conclusion(self) -> Judgement:
+    raise NotImplementedError(
+        'Do not call Conclusion with DerivationRule subclass'
+    )
+
+  def __str__(self):
+    premiss_str = ', '.join([str(p) for p in self.premisses])
+    horiz_rule = '-' * len(premiss_str)
+    if premiss_str:
+      return f'{premiss_str}\n{horiz_rule}\n{self.Conclusion()}'
+    return str(self.Conclusion())
+
+
+class SortRule(DerivationRule):
+  def __init__(self, ctx: Context):
+    super().__init__()
+    self.ctx = ctx
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(Star()))
+
+
+class VarRule(DerivationRule):
+  def __init__(self, u: Union[TypeVar, Var], premiss: Judgement):
+    super().__init__(premiss)
+    self.ctx = ctx = premiss.ctx
+    match u:
+      case TypeVar():
+        if self.ctx.ContainsTypeVar(u):
+          raise ValueError(
+              f'Cannot create VarRule {u} already occurs in Context {ctx}'
+          )
+        if u.kind != Star() and premiss.stmt.subj != u.kind:
+          raise TypeError(
+              f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
+          )
+      case Var():
+        if self.ctx.ContainsVar(u):
+          raise ValueError(
+              f'Cannot create VarRule {u} already occurs in Context {ctx}'
+          )
+        if not isinstance(premiss.stmt.subj, TypeExpression):
+          raise ValueError(
+              f'Cannot create VarRule for {u} with premiss {premiss}'
+          )
+        if premiss.stmt.subj != u.typ:
+          raise TypeError(
+              f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
+          )
+      case _:
+        raise NotImplementedError(f'Unexpected input to VarRule {u}')
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    match self.u:
+      case TypeVar():
+        stmt = Statement(TypeExpression(self.u))
+        ctx = self.ctx.PushTypeVar(self.u)
+      case Var():
+        stmt = Statement(Expression(self.u))
+        ctx = self.ctx.PushVar(self.u)
+    return Judgement(ctx, stmt)

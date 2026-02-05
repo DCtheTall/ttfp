@@ -27,5 +27,29 @@ def RunExamples():
   print(TypeExpression(TApply(Pt, three)))
 
 
+  print('\nExamples from 5.2')
+  print('Sort rule:')
+  sr = SortRule(Context())
+  print(sr)
+  print('Var rule for type:')
+  alpha = TypeVar('α', Star())
+  vt = VarRule(alpha, sr.Conclusion())
+  print(vt)
+  print('Var rule for term:')
+  x = Var('x', alpha)
+  vr = VarRule(x, vt.Conclusion())
+  print(vr)
+  print('Weak rule:')
+  # TODO
+  print('Form rule:')
+  # TODO
+  print('Appl rule:')
+  # TODO
+  print('Abst rule:')
+  # TODO
+  print('Conv rule:')
+  # TODO
+
+
 if __name__ == '__main__':
   RunExamples()
