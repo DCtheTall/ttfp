@@ -43,15 +43,20 @@ def RunExamples():
   print('Weak rule for type:')
   beta = TypeVar('β', Star())
   wt = WeakRule(beta, vtc, SortRule(vtc.ctx).Conclusion())
+  wtc = wt.Conclusion()
   print(wt)
   print('Weak rule for term:')
   wr = WeakRule(x, vtc, vtc)
   print(wr)
-  print('Form rule:')
+  print('Form rule for kind:')
+  fk = FormRule(x, vtc, SortRule(vtc.ctx).Conclusion())
+  print(fk)
+  print('Form rule for type:')
+  ft = FormRule(x, vtc, vtc)
+  print(ft)
+  print('Appl rule for type:')
   # TODO
-  print('Appl rule:')
-  # TODO
-  print('Abst rule:')
+  print('Abst rule for term:')
   # TODO
   print('Conv rule:')
   # TODO

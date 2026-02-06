@@ -1247,7 +1247,6 @@ class WeakRule(DerivationRule):
       raise ValueError('Can only create WeakRule with 2 Judgements')
     super().__init__(*premisses)
     p_ab, p_cs = self.premisses
-    assert p_ab.ctx == p_cs.ctx
     ab = p_ab.stmt.subj
     match ab:
       case Expression():

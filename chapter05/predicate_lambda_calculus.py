@@ -1000,7 +1000,6 @@ class WeakRule(DerivationRule):
       raise ValueError('Can only create WeakRule with 2 Judgements')
     super().__init__(*premisses)
     p_ab, p_cs = self.premisses
-    assert p_ab.ctx == p_cs.ctx
     ab = p_ab.stmt.subj
     cs = p_cs.stmt.subj
     match u:
@@ -1034,3 +1033,30 @@ class WeakRule(DerivationRule):
           ctx = self.ctx.PushVar(self.u)
         subj = p_ab.stmt.subj.Copy()
     return Judgement(ctx, Statement(subj))
+
+
+class FormRule(DerivationRule):
+  def __init__(self, arg: Var, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create FormRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_a, p_b = self.premisses
+    self.ctx = p_a.ctx.OverlappingUnion(p_b.ctx)
+    a = p_a.stmt.subj
+    b = p_b.stmt.subj
+    if not isinstance(a, TypeExpression):
+      raise TypeError(f'Invalid first premiss to FormRule {p_a}')
+    if arg.typ != a:
+      raise TypeError(
+          f'First FormRule premiss not match type of argument {arg}, {p_a}'
+      )
+    match b:
+      case KindExpression():
+        self.ab = KindExpression(PiKind(arg, b))
+      case TypeExpression():
+        self.ab = TypeExpression(PiType(arg, b))
+      case _:
+        raise NotImplementedError(f'Unexpected input to FormRule {p_b}')
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(self.ab))
