@@ -74,7 +74,7 @@ def RunExamples():
   deriv = Derivation(Context())
   i = deriv.VarRule(alpha)
   beta = TypeVar('β', Star())
-  ii = deriv.WeakRule(beta, i, i)
+  ii = deriv.WeakRule(beta, i, deriv.SortRulePremiss())
   print(deriv.LinearFormat())
   print('Third derivation (?3):')
   deriv = Derivation(Context())

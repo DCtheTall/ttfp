@@ -103,7 +103,8 @@ class KindExpression(Kind):
         return KindExpression(Star())
       case PiKind():
         bv = BindingVar(self.kind.arg)
-        return KindExpression(PiKind(bv.var, self.kind.body.Copy()))
+        bv.typ = TypeExpression(self.kind.arg.typ)
+        return KindExpression(PiKind(bv, self.kind.body.Copy()))
       case _:
         raise NotImplementedError(
             f'Unexpected member of KindExpression {self.kind}'
@@ -305,8 +306,8 @@ class TypeExpression(Type):
         bv = BindingVar(self.typ.arg)
         return TypeExpression(PiType(bv, self.typ.body.Copy()))
       case TAbstract():
-        bv = self.typ.arg
-        return TypeExpression(TAbstract(bv.var, self.typ.body.Copy()))
+        bv = BindingVar(self.typ.arg)
+        return TypeExpression(TAbstract(bv, self.typ.body.Copy()))
       case TApply():
         return TypeExpression(TApply(self.typ.fn.Copy(), self.typ.arg.Copy()))
       case _:
@@ -785,7 +786,7 @@ class Context:
     for u in args:
       match u:
         case TypeVar():
-          for fv in FreeVars(u.kind):
+          for fv in FreeVars(TypeExpression(u).kind):
             if not self.ContainsVar(fv):
               raise ValueError(
                   f'Context {self} does not contain free vars in kind of {u}'
@@ -830,11 +831,11 @@ class Context:
       return False
     return self < other and other < self
 
-  def ContainsTypeVar(self, u: TypeVar):
+  def ContainsTypeVar(self, u: TypeVar) -> bool:
     assert isinstance(u, TypeVar)
     return self.Dom().ContainsTypeVar(u)
 
-  def ContainsVar(self, u: Var):
+  def ContainsVar(self, u: Var) -> bool:
     assert isinstance(u, Var)
     return self.Dom().ContainsVar(u)
 
@@ -848,7 +849,12 @@ class Context:
     if isinstance(sttmt.subj, TypeExpression):
       return
     for decl in self.var_declarations:
-      sttmt.subj.typ.MaybeBindFreeVarsTo(decl.subj)
+      match sttmt.subj:
+        case TypeExpression():
+          sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+        case Expression():
+          sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+          sttmt.subj.typ.MaybeBindFreeVarsTo(decl.subj)
 
   def PushTypeVar(self, u: TypeVar) -> 'Context':
     assert isinstance(u, TypeVar)
@@ -856,7 +862,7 @@ class Context:
       raise Exception(f'Context {self} contains {u}')
     return Context(*self.Dom(), u)
 
-  def PushVar(self, u: Var):
+  def PushVar(self, u: Var) -> 'Context':
     assert isinstance(u, Var)
     if self.ContainsVar(u):
       raise Exception(f'Context {self} contains {u}')
@@ -872,15 +878,21 @@ class Context:
         self.ContainsVar(u) for u in FreeVars(rho)
     )
 
+  def OverlappingUnion(self, other: 'Context') -> 'Context':
+    assert self < other or other < self
+    if self < other:
+      return other
+    return self
+
 
 class Statement:
-  subj: Union[Kind, TypeExpression, Expression]
+  subj: Union[KindExpression, TypeExpression, Expression]
   typ: Union[TypeExpression, Kind, AllKinds]
 
-  def __init__(self, subj: Union[Kind, TypeExpression, Expression]):
+  def __init__(self, subj: Union[KindExpression, TypeExpression, Expression]):
     self.subj = subj
     match subj:
-      case Kind():
+      case KindExpression():
         self.typ = AllKinds()
       case TypeExpression():
         self.typ = subj.kind
@@ -937,7 +949,7 @@ class SortRule(DerivationRule):
     self.ctx = ctx
 
   def Conclusion(self) -> Judgement:
-    return Judgement(self.ctx, Statement(Star()))
+    return Judgement(self.ctx, Statement(KindExpression(Star())))
 
 
 class VarRule(DerivationRule):
@@ -980,3 +992,45 @@ class VarRule(DerivationRule):
         stmt = Statement(Expression(self.u))
         ctx = self.ctx.PushVar(self.u)
     return Judgement(ctx, stmt)
+
+
+class WeakRule(DerivationRule):
+  def __init__(self, u: Union[TypeVar, Var], *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create WeakRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_ab, p_cs = self.premisses
+    assert p_ab.ctx == p_cs.ctx
+    ab = p_ab.stmt.subj
+    cs = p_cs.stmt.subj
+    match u:
+      case Var():
+        if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
+          raise ValueError(f'Cannot redeclare variable {u}')
+        if not isinstance(cs, TypeExpression) and cs.Type() != u.Type():
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u}'
+          )
+      case TypeVar():
+        if p_ab.ctx.ContainsTypeVar(u) or p_cs.ctx.ContainsTypeVar(u):
+          raise ValueError(f'Cannot redeclare type variable {u}')
+        if not isinstance(cs, Kind) or cs.kind != u.kind:
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u} '
+          )
+    self.ctx = p_ab.ctx.OverlappingUnion(p_cs.ctx)
+    self.u = u
+
+  def Conclusion(self) -> Judgement:
+    p_ab, p_c = self.premisses
+    ctx = self.ctx
+    match self.u:
+      case TypeVar():
+        if not self.ctx.ContainsTypeVar(self.u):
+          ctx = self.ctx.PushTypeVar(self.u)
+        subj = p_ab.stmt.subj.Copy()
+      case Var():
+        if not self.ctx.ContainsVar(self.u):
+          ctx = self.ctx.PushVar(self.u)
+        subj = p_ab.stmt.subj.Copy()
+    return Judgement(ctx, Statement(subj))

@@ -18,8 +18,15 @@ Var rule for type:
 Var rule for term:
 α:* |- α:*
 ----------
-α:*, x:α |- x:α
-Weak rule:
+α:*, x:α |- x
+Weak rule for type:
+α:* |- α:*, α:* |- *:□
+----------------------
+α:*, β:* |- α:*
+Weak rule for term:
+α:* |- α:*, α:* |- α:*
+----------------------
+α:*, x:α |- α:*
 Form rule:
 Appl rule:
 Abst rule:

@@ -1079,6 +1079,8 @@ class Context:
     return self < other and other < self
 
   def BindStatementFreeVars(self, sttmt: Statement):
+    if isinstance(sttmt.subj, Kind):
+      return
     for decl in self.typ_declarations:
       sttmt.subj.MaybeBindFreeTypesTo(decl.subj)
     if isinstance(sttmt.subj, TypeExpression):
@@ -1264,14 +1266,14 @@ class WeakRule(DerivationRule):
       case Var():
         if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
           raise ValueError(f'Cannot redeclare variable {u}')
-        if not isinstance(cs, TypeExpression) and cs.Type() != u.Type():
+        if not isinstance(cs, TypeExpression) or cs.Type() != u.Type():
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u}'
           )
       case TypeVar():
         if p_ab.ctx.ContainsTypeVar(u) or p_cs.ctx.ContainsTypeVar(u):
           raise ValueError(f'Cannot redeclare type variable {u}')
-        if not isinstance(cs, Kind) and cs.kind != u.kind:
+        if not isinstance(cs, Kind) or cs != u.kind:
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u} '
           )
@@ -1446,7 +1448,9 @@ class Derivation:
     self.SortRule()
 
   def SortRulePremiss(self) -> Judgement:
-    return self.conclusions[0]
+    if isinstance(self.rules[-1], SortRule):
+      return self.conclusions[-1]
+    return self._AddRule(SortRule(self.ctx))
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
