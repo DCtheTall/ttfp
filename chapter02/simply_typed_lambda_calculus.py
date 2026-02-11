@@ -740,6 +740,10 @@ def InferType(M: ut.Expression, free_types: list[TypeVar]):
   return InferTypes(M, free_types)[0][1]
 
 
+class RenameBindingVarError(Exception):
+  pass
+
+
 def Rename(M: Expression, x: Var, y: Var) -> Expression:
   def _HasBindingVar(M: Expression, y: Var) -> bool:
     match M.term:

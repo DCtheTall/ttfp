@@ -95,7 +95,7 @@ class KindExpression(Kind):
   def __eq__(self, other):
     if not isinstance(other, KindExpression):
       return self.kind == other
-    raise KAlphaEquiv(self, other)
+    return KAlphaEquiv(self, other)
 
   def Copy(self) -> 'KindExpression':
     match self.kind:
@@ -170,7 +170,7 @@ class PiType(Type):
         and not FreeVars(self.body.Copy()).Contains(self.arg.var)
     ):
       body_str = str(self.body)
-      if isinstance(self.body.kind, PiKind) and body_str[0] == '(':
+      if isinstance(self.body.Kind(), PiKind) and body_str[0] == '(':
         body_str = body_str[1:-1]
       arg_str = str(self.arg.typ)
       arg_kind = str(self.arg.typ.kind)[:-2]
@@ -237,7 +237,9 @@ class TApply(Type):
       raise TypeError(f'Unexpected input to TApply {fn}')
     self.fn = fn
     self.arg = arg
-    self.kind = self.fn.Kind().body
+    self.kind = Substitute(
+        self.fn.Kind().body, self.fn.Kind().arg, arg, [], self.fn.Kind().arg
+    )
 
   def __eq__(self, other):
     if isinstance(other, TypeExpression):
@@ -320,11 +322,9 @@ class TypeExpression(Type):
       case PiType() | TAbstract():
         self.typ.arg.typ.MaybeBindFreeVarsTo(bv)
         self.typ.body.MaybeBindFreeVarsTo(bv)
-        # print('A', self.typ, bv)
       case TApply():
         self.typ.fn.MaybeBindFreeVarsTo(bv)
         self.typ.arg.MaybeBindFreeVarsTo(bv)
-        # print('B', self.typ, bv)
     self.kind.MaybeBindFreeVarsTo(bv)
 
 
@@ -434,7 +434,9 @@ class Apply(Term):
       raise TypeError(f'Left term of Apply must be Π-type {fn.typ}')
     if fn.Type().arg.typ != arg.typ:
       raise TypeError(f'Mismatched types {fn} got {arg}')
-    self.typ = self.fn.Type()
+    self.typ = Substitute(
+        fn.Type().body, fn.Type().arg, arg, [], fn.Type().arg
+    )
 
   def __eq__(self, other):
     if isinstance(other, Expression):
@@ -516,6 +518,9 @@ class Expression(Term):
       case _:
         raise NotImplementedError(f'Unexpected input to Expression {term}')
     self.typ = TypeExpression(term.typ)
+    self.term.typ = self.typ
+    if isinstance(self.term, Occurrence):
+      self.term.var.typ = self.typ
 
   def __str__(self):
     return str(self.term)
@@ -528,7 +533,7 @@ class Expression(Term):
   def Copy(self):
     match self.term:
       case FreeVar() | BoundVar():
-        return Expression(self.term.var)
+        return Expression(self.term)
       case Apply():
         return Expression(Apply(self.term.fn, self.term.arg))
       case Abstract():
@@ -636,7 +641,7 @@ def KAlphaEquiv(
       case Star():
         return x.kind == y.kind
       case PiKind():
-        if not isinstance(y.term, Abstract):
+        if not isinstance(y.kind, PiKind):
           return False
         xu = x.kind.arg
         yu = y.kind.arg
@@ -720,6 +725,259 @@ def AlphaEquiv(
       case _:
         raise NotImplementedError(f'Unexpected input to AlphaEquiv {x}')
   return _Helper(x, y, de_brujin or DeBrujinIndices())
+
+
+class RenameBindingVarError(Exception):
+  pass
+
+
+def Rename(
+    M: Union[KindExpression, TypeExpression, Expression],
+    x: Union[BindingVar, Var],
+    y: Var
+) -> Union[TypeExpression, Expression]:
+  def _HasBindingVar(M: Union[TypeExpression, Expression], x: Var) -> bool:
+    match M:
+      case KindExpression():
+        match M.kind:
+          case Star():
+            return False
+          case PiKind():
+            if M.kind.arg.var == x:
+              return True
+            return _HasBindingVar(M.kind.body, x)
+      case TypeExpression():
+        match M.typ:
+          case TypeVar():
+            return False
+          case PiType() | TAbstract():
+            if M.typ.arg.var == x:
+              return True
+            return _HasBindingVar(M.typ.body, x)
+          case TApply():
+            return _HasBindingVar(M.typ.fn, x) or _HasBindingVar(M.typ.arg, x)
+      case Expression():
+        match M.term:
+          case Occurrence():
+            return False
+          case Abstract():
+            if M.term.arg.var == x:
+              return True
+            return _HasBindingVar(M.term.body, x)
+          case Apply():
+            return (
+                _HasBindingVar(M.term.fn, x) or _HasBindingVar(M.term.arg, x)
+            )
+      case _:
+        raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
+  
+  def _RenameBoundVar(
+      M: Union[KindExpression, TypeExpression, Expression],
+      x: BindingVar,
+      y: BindingVar
+  ) -> Union[TypeExpression, Expression]:
+    match M:
+      case KindExpression():
+        match m.kind:
+          case Star():
+            return M
+          case PiKind():
+            return KindExpression(
+                PiKind(M.kind.arg, _RenameBoundVar(M.kind.body, x, y))
+            )
+      case TypeExpression():
+        match M.typ:
+          case TypeVar():
+            return M
+          case PiType():
+            return TypeExpression(PiType(M.typ.arg, _RenameBoundVar(M, x, y)))
+          case TAbstract():
+            return TypeExpression(
+                TAbstract(M.typ.arg, _RenameBoundVar(M, x, y))
+            )
+          case TApply():
+            return TypeExpression(
+                TApply(
+                    _RenameBoundVar(M.typ.fn, x, y),
+                    _RenameBoundVar(M.typ.arg, x, y)
+                )
+            )
+      case Expression():
+        match M.term:
+          case FreeVar():
+            return M
+          case BoundVar():
+            if M.term.bv == x:
+              return BoundVar(y, FreeVar(y.var))
+            return M
+          case Abstract():
+            return Expression(
+                Abstract(M.term.arg, _RenameBoundVar(M.term.body, x, y))
+            )
+          case Apply():
+            return Expression(
+                Apply(
+                    _RenameBoundVar(M.term.fn, x, y),
+                    _RenameBoundVar(M.term.arg, x, y)
+                )
+            )
+      case _:
+        raise NotImplementedError(f'Unexpected input to RenameBoundVar {M}')
+
+  match M:
+    case KindExpression():
+      match M.kind:
+        case Star():
+          return M
+        case PiKind():
+          if FreeVars(M.kind.body).Contains(y):
+            raise RenameFreeVarError(f'{y} in FV({M.kind.body})')
+          u = M.kind.arg
+          N = M.kind.body
+          if u == x:
+            v = BindingVar(y)
+            N = _RenameBoundVars(N, u, v)
+            N.MaybeBindFreeVarsTo(v)
+          else:
+            v = u
+          return KindExpression(PiKind(v, Rename(N, x, y)))
+    case TypeExpression():
+      match M.typ:
+        case TypeVar():
+          return M
+        case PiType() | TAbstract():
+          if FreeVars(M.typ.body).Contains(y):
+            raise RenameFreeVarError(f'{y} in FV({M.typ.body})')
+          u = M.typ.arg
+          N = M.typ.body
+          if u == x:
+            v = BindingVar(y)
+            N = _RenameBoundVars(N, u, v)
+            N.MaybeBindFreeVarsTo(v)
+          else:
+            v = u
+          return TypeExpression(type(M.typ)(v, Rename(N, x, y)))
+        case TApply():
+          return TypeExpression(
+              TApply(Rename(M.typ.fn, x, y), Rename(M.typ.arg, x, y))
+          )
+    case Expression():
+      match M.term:
+        case FreeVar():
+          if M.term.var == x:
+            return Expression(y)
+          return Expression(M.term.var)
+        case BoundVar():
+          return M
+        case Apply():
+          return Expression(
+              Apply(Rename(M.term.fn, x, y), Rename(M.term.arg, x, y))
+          )
+        case Abstract():
+          if FreeVars(M.term.body).Contains(y):
+            raise RenameFreeVarError(f'{y} in FV({M.term})')
+          u = M.term.arg
+          N = M.term.body
+          if u == x:
+            v = BindingVar(y)
+            N = _RenameBoundVars(N, u, v)
+            N.MaybeBindFreeVarsTo(v)
+          else:
+            v = u
+          return Expression(Abstract(v, Rename(N, x, y)))
+    case _:
+      raise NotImplementedError(f'Unexpected input to Rename {M}')
+
+
+def Substitute(
+    M: Union[KindExpression, TypeExpression, Expression],
+    x: Union[BindingVar, Var],
+    N: Expression,
+    new_vars: list[Var] = [],
+    binding:  Optional[BindingVar] = None,
+) -> Union[TypeExpression, Expression]:
+  match M:
+    case KindExpression():
+      match M.kind:
+        case Star():
+          return M
+        case PiKind():
+          fv = FreeVars(N)
+          if fv.Contains(M.kind.arg.var):
+            if not new_vars:
+              raise Exception(
+                  f'Need variable with type {M.kind.arg.typ} for substitution'
+              )
+            z = new_vars.pop()
+            assert not fv.Contains(z)
+            M = Rename(M, M.kind.arg, z)
+          return KindExpression(
+              PiKind(
+                  M.kind.arg, Substitute(M.kind.body, x, N, new_vars, binding)
+              )
+          )
+    case TypeExpression():
+      M.kind = M.typ.kind = Substitute(M.kind, x, N, new_vars, binding)
+      match M.typ:
+        case TypeVar():
+          return M
+        case PiType() | TAbstract():
+          fv = FreeVars(N)
+          if fv.Contains(M.typ.arg.var):
+            if not new_vars:
+              raise Exception(
+                  f'Need variable with type {M.typ.arg.typ} for substitution'
+              )
+            z = new_vars.pop()
+            assert not fv.Contains(z)
+            M = Rename(M, M.typ.arg, z)
+          return TypeExpression(
+              type(M.typ)(
+                  M.typ.arg, Substitute(M.typ.body, x, N, new_vars, binding)
+              )
+          )
+        case TApply():
+          return TypeExpression(
+              TApply(
+                  Substitute(M.typ.fn, x, N, new_vars, binding),
+                  Substitute(M.typ.arg, x, N, new_vars, binding)
+              )
+          )
+    case Expression():
+      M.typ = M.term.typ = Substitute(M.typ, x, N, new_vars, binding)
+      match M.term:
+        case FreeVar():
+          if M.term == x:
+            return N
+          return M
+        case BoundVar():
+          if binding is not None and M.term.BoundTo(binding):
+            return N
+          return M
+        case Apply():
+          return Expression(
+              Apply(
+                  Substitute(M.term.fn, x, N, new_vars, binding),
+                  Substitute(M.term.arg, x, N, new_vars, binding)
+              )
+          )
+        case Abstract():
+          fv = FreeVars(N)
+          if fv.Contains(M.term.arg.var):
+            if not new_vars:
+              raise Exception(
+                  f'Need variable with type {M.term.arg.typ} for substitution'
+              )
+            z = new_vars.pop()
+            assert not fv.Contains(z)
+            M = Rename(M, M.term.arg, z)
+          return Expression(
+              Abstract(
+                  M.term.arg, Substitute(M.term.body, x, N, new_vars, binding)
+              )
+          )
+    case _:
+      raise NotImplementedError(f'Unexpected input to Substitute {M}')
 
 
 class TypeDeclaration:
@@ -849,12 +1107,7 @@ class Context:
     if isinstance(sttmt.subj, TypeExpression):
       return
     for decl in self.var_declarations:
-      match sttmt.subj:
-        case TypeExpression():
-          sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
-        case Expression():
-          sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
-          sttmt.subj.typ.MaybeBindFreeVarsTo(decl.subj)
+      sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
 
   def PushTypeVar(self, u: TypeVar) -> 'Context':
     assert isinstance(u, TypeVar)
@@ -962,7 +1215,7 @@ class VarRule(DerivationRule):
           raise ValueError(
               f'Cannot create VarRule {u} already occurs in Context {ctx}'
           )
-        if u.kind != Star() and premiss.stmt.subj != u.kind:
+        if premiss.stmt.subj != KindExpression(u.kind):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
@@ -975,7 +1228,7 @@ class VarRule(DerivationRule):
           raise ValueError(
               f'Cannot create VarRule for {u} with premiss {premiss}'
           )
-        if premiss.stmt.subj != u.typ:
+        if premiss.stmt.subj != TypeExpression(u.typ):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
@@ -1060,3 +1313,35 @@ class FormRule(DerivationRule):
 
   def Conclusion(self) -> Judgement:
     return Judgement(self.ctx, Statement(self.ab))
+
+
+class ApplRule(DerivationRule):
+  def __init__(self, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create ApplRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_mxab, p_na = self.premisses
+    self.ctx = p_mxab.ctx.OverlappingUnion(p_na.ctx)
+    mxab, na = p_mxab.stmt.subj, p_na.stmt.subj
+    if not isinstance(na, Expression):
+      raise TypeError(f'Invalid second premiss to ApplRule {p_na}')
+    match mxab:
+      case TypeExpression():
+        if not isinstance(mxab.Kind(), PiKind):
+          raise TypeError(f'Invalid first premiss to ApplRule {p_mxab}')
+        if na.typ != mxab.Kind().arg.typ:
+          raise TypeError(f'Invalid second premiss to ApplRule {p_na}')
+        self.mn = TypeExpression(TApply(mxab, na))
+      case Expression():
+        if not isinstance(mxab.Type(), PiType):
+          raise TypeError(f'Invalid first premiss to ApplRule {p_mxab}')
+        if na.typ != mxab.Type().arg.typ:
+          raise TypeError(f'Invalid second premiss to ApplRule {p_na}')
+        self.mn = Expression(Apply(mxab, na))
+      case _:
+        raise NotImplementedError(
+            f'Unexpected first premiss to ApplRule {p_mxab}'
+        )
+
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(self.mn))
