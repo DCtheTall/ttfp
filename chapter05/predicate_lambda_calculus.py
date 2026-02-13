@@ -1125,6 +1125,16 @@ class Context:
       )
     return Context(*self.Dom(), u)
 
+  def PullVar(self, u: Var) -> 'Context':
+    if not self.ContainsVar(u):
+      raise Exception(f'Context {self} does not contain {u}')
+    new_ctx = []
+    for v in self.Dom():
+      if isinstance(v, Var) and u == v:
+        continue
+      new_ctx.append(v)
+    return Context(*new_ctx)
+
   def ContainsFreeVars(self, rho: TypeExpression):
     assert isinstance(rho, TypeExpression)
     return all(
@@ -1345,3 +1355,39 @@ class ApplRule(DerivationRule):
 
   def Conclusion(self) -> Judgement:
     return Judgement(self.ctx, Statement(self.mn))
+
+
+class AbstRule(DerivationRule):
+  def __init__(self, u: Var, *premisses: Sequence[Judgement]):
+    if len(premisses) != 2:
+      raise ValueError('Can only create AbstRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_xamb, p_abs = self.premisses
+    self.ctx = p_xamb.ctx.OverlappingUnion(p_abs.ctx).PullVar(u)
+    xa_mb, ab_s =  p_xamb.stmt.subj, p_abs.stmt.subj
+    match xa_mb:
+      case TypeExpression():
+        if (
+            not isinstance(ab_s, KindExpression)
+            or not isinstance(ab_s.kind, PiKind)
+        ):
+          raise TypeError(f'Invalid second premiss to AbstRule {p_abs}')
+        if ab_s.kind.arg.typ != u.typ or ab_s.kind.body != xa_mb.kind:
+          raise TypeError(f'Mismatched premisses to ApplRule {p_xamb} {p_abs}')
+        self.xam_xab = TypeExpression(TAbstract(u, xa_mb))
+      case Expression():
+        if (
+            not isinstance(ab_s, TypeExpression)
+            or not isinstance(ab_s.typ, PiType)
+        ):
+          raise TypeError(f'Invalid second premiss to AbstRule {p_abs}')
+        if ab_s.typ.arg.typ != u.typ or ab_s.typ.body != xa_mb.typ:
+          raise TypeError(f'Mismatched premisses to ApplRule {p_xamb} {p_abs}')
+        self.xam_xab = Expression(Abstract(u, xa_mb))
+      case _:
+        raise NotImplementedError(
+            f'Unexpected first premiss to AbstRule {p_xamb}'
+        )
+  
+  def Conclusion(self):
+    return Judgement(self.ctx, Statement(self.xam_xab))

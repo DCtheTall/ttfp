@@ -68,9 +68,24 @@ def RunExamples():
   ftc = FormRule(x, wtc, wtc).Conclusion()
   vfc = VarRule(f, ftc).Conclusion()
   print(ApplRule(vfc, vrc))
-  # TODO
-  print('Abst rule:')
-  # TODO
+  print('Abst rule for type:')
+  src = SortRule(Context()).Conclusion()
+  vtc = VarRule(alpha, src).Conclusion()
+  wtc = WeakRule(x, vtc, vtc).Conclusion()
+  vrc = VarRule(x, vtc).Conclusion()
+  ftc = FormRule(x, wtc, SortRule(wtc.ctx).Conclusion()).Conclusion()
+  vfc = VarRule(F, ftc).Conclusion()
+  ac = ApplRule(vfc, vrc).Conclusion()
+  print(AbstRule(x, ac, ftc))
+  print('Abst rule for term:')
+  src = SortRule(Context()).Conclusion()
+  vtc = VarRule(alpha, src).Conclusion()
+  wtc = WeakRule(x, vtc, vtc).Conclusion()
+  vrc = VarRule(x, vtc).Conclusion()
+  ftc = FormRule(x, wtc, wtc).Conclusion()
+  vfc = VarRule(f, ftc).Conclusion()
+  ac = ApplRule(vfc, vrc).Conclusion()
+  print(AbstRule(x, ac, ftc))
   print('Conv rule:')
   # TODO
 
