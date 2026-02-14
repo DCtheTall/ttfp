@@ -319,7 +319,7 @@ class TypeExpression(Type):
   def Copy(self) -> 'TypeExpression':
     match self.typ:
       case TypeVar():
-        return TypeExpression(self.typ)
+        return TypeExpression(TypeVar(self.typ.name, self.typ.kind))
       case PiType():
         bv = BindingVar(self.typ.arg)
         return TypeExpression(PiType(bv, self.typ.body.Copy()))
@@ -345,6 +345,15 @@ class TypeExpression(Type):
 
   def BetaNormal(self) -> bool:
     return len(Redexes(self)) == 0
+
+  def ReplaceKind(self, new_k: KindExpression) -> 'TypeExpression':
+    assert isinstance(new_k, KindExpression)
+    if not (self.kind >> new_k):
+      raise TypeError(f'New kind {new_k} must be β-equal to {self.kind}')
+    T = self.Copy()
+    T.kind = new_k
+    T.typ.kind = T.kind
+    return T
 
 
 class Term:
@@ -400,7 +409,8 @@ class Occurrence:
 
 
 class FreeVar(Occurrence):
-  pass
+  def Copy(self) -> 'FreeVar':
+    return FreeVar(Var(self.var.name, self.typ))
 
 
 class BindingVar(Occurrence):
@@ -443,6 +453,9 @@ class BoundVar(Occurrence):
 
   def BoundTo(self, bv: BindingVar) -> bool:
     return self.bv == bv
+
+  def Copy(self) -> 'Binding':
+    return BoundVar(self.bv, FreeVar(Var(self.var.name, self.typ)))
 
 
 class Apply(Term):
@@ -576,7 +589,7 @@ class Expression(Term):
   def Copy(self):
     match self.term:
       case FreeVar() | BoundVar():
-        return Expression(self.term)
+        return Expression(self.term.Copy())
       case Apply():
         return Expression(Apply(self.term.fn, self.term.arg))
       case Abstract():
@@ -602,9 +615,16 @@ class Expression(Term):
   def BetaNormal(self) -> bool:
     return len(Redexes(self)) == 0
 
-  def ReplaceType(self, typ: Type):
-    # TODO
-    pass
+  def ReplaceType(self, new_t: TypeExpression) -> 'Expression':
+    assert isinstance(new_t, TypeExpression)
+    if not (self.typ >> new_t):
+      raise TypeError(f'New type {new_t} must be β-equal to {self.typ}')
+    M = self.Copy()
+    M.typ = new_t
+    M.term.typ = M.typ
+    if isinstance(M.term, Occurrence):
+      M.term.var = Var(M.term.var.name, new_t)
+    return M
 
 
 class Multiset[T]:
@@ -1335,6 +1355,8 @@ class Statement:
         raise NotImplementedError(f'Unexpected input to Statement {subj}')
 
   def __str__(self):
+    if isinstance(self.subj, Expression) and isinstance(self.subj.term, BoundVar):
+      return str(self.subj.term.var)
     return str(self.subj)
 
 
@@ -1439,7 +1461,7 @@ class WeakRule(DerivationRule):
       case Var():
         if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
           raise ValueError(f'Cannot redeclare variable {u}')
-        if not isinstance(cs, TypeExpression) and cs.Type() != u.Type():
+        if not isinstance(cs, TypeExpression) or cs.typ != u.Type():
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u}'
           )
@@ -1474,7 +1496,7 @@ class FormRule(DerivationRule):
       raise ValueError('Can only create FormRule with 2 Judgements')
     super().__init__(*premisses)
     p_a, p_b = self.premisses
-    self.ctx = p_a.ctx.OverlappingUnion(p_b.ctx)
+    self.ctx = p_a.ctx.OverlappingUnion(p_b.ctx.PullVar(arg))
     a = p_a.stmt.subj
     b = p_b.stmt.subj
     if not isinstance(a, TypeExpression):
@@ -1564,5 +1586,36 @@ class AbstRule(DerivationRule):
 
 
 class ConvRule(DerivationRule):
-  # TODO
-  pass
+  def __init__(self, *premisses):
+    if len(premisses) != 2:
+      raise ValueError('Can only create ConvRule with 2 Judgements')
+    super().__init__(*premisses)
+    p_ab, p_bprime = self.premisses
+    self.ctx = p_ab.ctx.OverlappingUnion(p_bprime.ctx)
+    ab, b_prime = p_ab.stmt.subj, p_bprime.stmt.subj
+    match ab:
+      case TypeExpression():
+        if not isinstance(b_prime, KindExpression):
+          raise TypeError(f'Invalid second premiss to ConvRule {p_bprime}')
+        if not (ab.kind >> b_prime):
+          raise TypeError(
+              f'Kind of first premiss {p_ab} must be β-equal to second '
+              f'premiss {p_bprime}'
+          )
+        self.abprime = ab.ReplaceKind(b_prime)
+      case Expression():
+        if not isinstance(b_prime, TypeExpression):
+          raise TypeError(f'Invalid second premiss to ConvRule {p_bprime}')
+        if not (ab.typ >> b_prime):
+          raise TypeError(
+              f'Kind of first premiss {p_ab} must be β-equal to second '
+              f'premiss {p_bprime}'
+          )
+        self.abprime = ab.ReplaceType(b_prime)
+      case _:
+        raise NotImplementedError(
+            f'Unexpected first premiss to ConvRule {p_ab}'
+        )
+  
+  def Conclusion(self) -> Judgement:
+    return Judgement(self.ctx, Statement(self.abprime))
