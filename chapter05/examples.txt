@@ -51,4 +51,6 @@ Abst rule for term:
 α:*, x:α, f:(α -> α) |- (f x):α, α:*, x:α |- (α -> α):*
 -------------------------------------------------------
 α:*, f:(α -> α) |- (λx:α.(f x):α):(α -> α)
-Conv rule:
+Conv rule for kind:
+Conv rule for type:
+(Y z:A):*

@@ -97,6 +97,11 @@ class KindExpression(Kind):
       return self.kind == other
     return KAlphaEquiv(self, other)
 
+  def __rshift__(self, other):
+    if not isinstance(other, KindExpression):
+      return False
+    return BetaEquiv(self, other)
+
   def Copy(self) -> 'KindExpression':
     match self.kind:
       case Star():
@@ -114,6 +119,9 @@ class KindExpression(Kind):
     if isinstance(self.kind, PiKind):
       self.kind.arg.typ.MaybeBindFreeVarsTo(bv)
       self.kind.body.MaybeBindFreeVarsTo(bv)
+
+  def BetaNormal(self) -> bool:
+    return len(Redexes(self)) == 0
 
 
 class Type:
@@ -237,9 +245,12 @@ class TApply(Type):
       raise TypeError(f'Unexpected input to TApply {fn}')
     self.fn = fn
     self.arg = arg
-    self.kind = Substitute(
-        self.fn.Kind().body, self.fn.Kind().arg, arg, [], self.fn.Kind().arg
-    )
+    if isinstance(self.fn, TypeExpression):
+      self.kind = Substitute(
+          self.fn.Kind().body, self.fn.Kind().arg, arg, [], self.fn.Kind().arg
+      )
+    else:
+      self.kind = self.fn.Kind().body
 
   def __eq__(self, other):
     if isinstance(other, TypeExpression):
@@ -300,6 +311,11 @@ class TypeExpression(Type):
   def __str__(self):
     return str(self.typ)
 
+  def __rshift__(self, other):
+    if not isinstance(other, TypeExpression):
+      return False
+    return BetaEquiv(self, other)
+
   def Copy(self) -> 'TypeExpression':
     match self.typ:
       case TypeVar():
@@ -326,6 +342,9 @@ class TypeExpression(Type):
         self.typ.fn.MaybeBindFreeVarsTo(bv)
         self.typ.arg.MaybeBindFreeVarsTo(bv)
     self.kind.MaybeBindFreeVarsTo(bv)
+
+  def BetaNormal(self) -> bool:
+    return len(Redexes(self)) == 0
 
 
 class Term:
@@ -434,9 +453,12 @@ class Apply(Term):
       raise TypeError(f'Left term of Apply must be Π-type {fn.typ}')
     if fn.Type().arg.typ != arg.typ:
       raise TypeError(f'Mismatched types {fn} got {arg}')
-    self.typ = Substitute(
-        fn.Type().body, fn.Type().arg, arg, [], fn.Type().arg
-    )
+    if isinstance(fn, Expression):
+      self.typ = Substitute(
+          fn.Type().body, fn.Type().arg, arg, [], fn.Type().arg
+      )
+    else:
+      self.typ = fn.Type().body
 
   def __eq__(self, other):
     if isinstance(other, Expression):
@@ -461,6 +483,22 @@ class Apply(Term):
     if typ.endswith(k_typ):
       typ = typ[:-len(k_typ)-1]
     return f'({fn_str} {arg}):{typ}'
+
+  def Fn(self) -> Union[Var, Apply, Abstract]:
+    fn = self.fn
+    if isinstance(fn, Expression):
+      fn = fn.term
+    if isinstance(fn, Occurrence):
+      fn = fn.var
+    return fn
+
+  def Arg(self) -> Union[Var, Apply, Abstract]:
+    arg = self.arg
+    if isinstance(arg, Expression):
+      arg = arg.term
+    if isinstance(arg, Occurrence):
+      arg = arg.var
+    return arg
 
 
 class Abstract(Term):
@@ -530,6 +568,11 @@ class Expression(Term):
       return self.term == other
     return AlphaEquiv(self, other)
 
+  def __rshift__(self, other):
+    if not isinstance(other, Expression):
+      return False
+    return BetaEquiv(self, other)
+
   def Copy(self):
     match self.term:
       case FreeVar() | BoundVar():
@@ -555,6 +598,9 @@ class Expression(Term):
         self.term.arg.typ.MaybeBindFreeVarsTo(bv)
         self.term.body.MaybeBindFreeVarsTo(bv)
     self.typ.MaybeBindFreeVarsTo(bv)
+
+  def BetaNormal(self) -> bool:
+    return len(Redexes(self)) == 0
 
   def ReplaceType(self, typ: Type):
     # TODO
@@ -778,7 +824,7 @@ def Rename(
   ) -> Union[TypeExpression, Expression]:
     match M:
       case KindExpression():
-        match m.kind:
+        match M.kind:
           case Star():
             return M
           case PiKind():
@@ -836,7 +882,7 @@ def Rename(
           N = M.kind.body
           if u == x:
             v = BindingVar(y)
-            N = _RenameBoundVars(N, u, v)
+            N = _RenameBoundVar(N, u, v)
             N.MaybeBindFreeVarsTo(v)
           else:
             v = u
@@ -852,7 +898,7 @@ def Rename(
           N = M.typ.body
           if u == x:
             v = BindingVar(y)
-            N = _RenameBoundVars(N, u, v)
+            N = _RenameBoundVar(N, u, v)
             N.MaybeBindFreeVarsTo(v)
           else:
             v = u
@@ -978,6 +1024,130 @@ def Substitute(
           )
     case _:
       raise NotImplementedError(f'Unexpected input to Substitute {M}')
+
+
+def OneStepBetaReduce(
+    M: Union[KindExpression, TypeExpression, Expression],
+    new_vars: list[Var] = [],
+):
+  match M:
+    case KindExpression():
+      match M.kind:
+        case Star():
+          return M
+        case PiKind():
+          if not M.kind.arg.typ.BetaNormal():
+            new_t = OneStepBetaReduce(M.kind.arg.typ, new_vars)
+            new_arg = Var(M.kind.arg.var.name, new_t)
+            return KindExpression(PiKind(new_arg, M.kind.body))
+          return KindExpression(
+              M.kind.arg, OneStepBetaReduce(M.kind.body, new_vars)
+          )
+    case TypeExpression():
+      match M.typ:
+        case TypeVar():
+          new_k = OneStepBetaReduce(M.typ.kind, new_vars)
+          return TypeExpression(TypeVar(M.typ.typ.name, new_k))
+        case PiType() | TAbstract():
+          if not M.typ.arg.typ.BetaNormal():
+            new_t = OneStepBetaReduce(M.typ.arg.typ, new_vars)
+            new_arg = Var(M.typ.arg.var.name, new_t)
+            return TypeExpression(type(M.typ)(new_arg, M.typ.body))
+          return TypeExpression(
+              type(M.typ)(M.typ.arg, OneStepBetaReduce(M.typ.body, new_vars))
+          )
+        case TApply():
+          if isinstance(M.typ.FnType(), TAbstract):
+            M, N = M.typ.fn, M.typ.arg
+            return Substitute(M.typ.body, M.typ.arg, N, new_vars, M.typ.arg)
+          if not M.typ.fn.BetaNormal():
+            return TypeExpression(
+                TApply(OneStepBetaReduce(M.typ.fn, new_vars), M.typ.arg)
+            )
+          return TypeExpression(
+              TApply(M.typ.fn, OneStepBetaReduce(M.typ.arg, new_vars))
+          )
+    case Expression():
+      match M.term:
+        case FreeVar() | BoundVar():
+          new_t = OneStepBetaReduce(M.term.typ, new_vars)
+          return Expression(Var(M.term.var.name, new_t))
+        case Abstract():
+          if not M.term.arg.typ.BetaNormal():
+            new_t = OneStepBetaReduce(M.term.arg.typ, new_vars)
+            new_arg = Var(M.term.arg.var.name, new_t)
+            return Expression(Abstract(new_arg, M.term.body))
+          return  Expression(
+              Abstract(M.term.arg, OneStepBetaReduce(M.term.body, new_vars))
+          )
+        case Apply():
+          if isinstance(M.term.Fn(), Abstract):
+            M, N = M.term.fn, M.term.arg
+            return Substitute(M.term.body, M.term.arg, N, new_vars, M.term.arg)
+          if not M.term.fn.BetaNormal():
+            return Expression(
+                Apply(OneStepBetaReduce(M.term.fn, new_vars), M.term.arg)
+            )
+          return Expression(
+              Apply(M.term.fn, OneStepBetaReduce(M.term.arg, new_vars))
+          )
+    case _:
+      raise NotImplementedError(f'Unexpected input to OneStepBetaReduce {M}')
+
+
+class Redexes(Multiset[Union[KindExpression, TypeExpression, Expression]]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
+    match M:
+      case KindExpression():
+        match M.kind:
+          case Star():
+            self.elems = []
+          case PiKind():
+            self.elems = Redexes(M.kind.arg.typ).elems
+      case TypeExpression():
+        match M.typ:
+          case TypeVar():
+            self.elems = []
+          case PiType() | TAbstract():
+            self.elems = (
+                Redexes(M.typ.arg.typ).elems + Redexes(M.typ.body).elems
+            )
+          case TApply():
+            self.elems = Redexes(M.typ.fn).elems + Redexes(M.typ.arg).elems
+            if isinstance(M.typ.fn.typ, TAbstract):
+              self.elems.append(M)
+        self.elems += Redexes(M.kind).elems
+      case Expression():
+        match M.term:
+          case FreeVar() | BoundVar():
+            self.elems = []
+          case Abstract():
+            self.elems = (
+                Redexes(M.term.arg.typ).elems + Redexes(M.term.body).elems
+            )
+          case Apply():
+            self.elems = Redexes(M.term.fn).elems + Redexes(M.term.arg).elems
+            if isinstance(M.term.Fn(), Abstract):
+              self.elems.append(M)
+        self.elems += Redexes(M.typ).elems
+      case _:
+        raise NotImplementedError(f'Unexpected input to Redexes {M}')
+
+
+def BetaReduce(
+    M: Union[KindExpression, TypeExpression, Expression],
+    new_vars: list[Var] = []
+):
+  while not M.BetaNormal():
+    M = OneStepBetaReduce(M, new_vars)
+  return M
+
+
+def BetaEquiv(
+    M: Union[KindExpression, TypeExpression, Expression],
+    N: Union[KindExpression, TypeExpression, Expression],
+):
+  return BetaReduce(M) == BetaReduce(N)
 
 
 class TypeDeclaration:
@@ -1391,3 +1561,8 @@ class AbstRule(DerivationRule):
   
   def Conclusion(self):
     return Judgement(self.ctx, Statement(self.xam_xab))
+
+
+class ConvRule(DerivationRule):
+  # TODO
+  pass

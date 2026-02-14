@@ -86,8 +86,16 @@ def RunExamples():
   vfc = VarRule(f, ftc).Conclusion()
   ac = ApplRule(vfc, vrc).Conclusion()
   print(AbstRule(x, ac, ftc))
-  print('Conv rule:')
+  print('Conv rule for kind:')
   # TODO
+  print('Conv rule for type:')
+  # TODO
+  A = TypeVar('A', Star())
+  u = Var('u', A)
+  x = Var('x', A)
+  Y = TypeVar('Y', PiKind(u, Star()))
+  z = Var('z', A)
+  print(BetaReduce(TypeExpression(TApply(TAbstract(x, TApply(Y, x)), z))))
 
 
 if __name__ == '__main__':
