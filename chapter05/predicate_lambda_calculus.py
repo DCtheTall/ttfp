@@ -1293,11 +1293,9 @@ class Context:
         [decl.subj.var for decl in self.var_declarations]
     )
 
-  def BindStatementFreeVars(self, sttmt: Statement):
-    if isinstance(sttmt.subj, TypeExpression):
-      return
+  def BindStatementFreeVars(self, stmt: Statement):
     for decl in self.var_declarations:
-      sttmt.subj.MaybeBindFreeVarsTo(decl.subj)
+      stmt.subj.MaybeBindFreeVarsTo(decl.subj)
 
   def PushTypeVar(self, u: TypeVar) -> 'Context':
     assert isinstance(u, TypeVar)
@@ -1606,9 +1604,9 @@ class ConvRule(DerivationRule):
       case Expression():
         if not isinstance(b_prime, TypeExpression):
           raise TypeError(f'Invalid second premiss to ConvRule {p_bprime}')
-        if not (ab.typ >> b_prime):
+        if not (TypeExpression(ab.typ) >> TypeExpression(b_prime)):
           raise TypeError(
-              f'Kind of first premiss {p_ab} must be β-equal to second '
+              f'Type of first premiss {p_ab} must be β-equal to second '
               f'premiss {p_bprime}'
           )
         self.abprime = ab.ReplaceType(b_prime)
