@@ -129,7 +129,7 @@ def RunExercises():
   M = Expression(ApplyT(ApplyT(M, nat), boolT))
   print('Derive:')
   print(M)
-  deriv = DeriveTerm(Judgement(Context(), Statement(M, M.Type())))
+  deriv = DeriveTerm(Judgement(Context(nat, boolT), Statement(M, M.Type())))
   print(deriv.FlagFormat())
 
 

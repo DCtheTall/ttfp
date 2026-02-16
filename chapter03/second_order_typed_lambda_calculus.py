@@ -1325,7 +1325,7 @@ class DerivationRule:
     if premisses:
       ctx = premisses[0].ctx
       for pmiss in premisses:
-        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+        if ctx != pmiss.ctx:
           raise ValueError(
               'Cannot use different Contexts in premisses of '
               f'the same DerivationRule: {ctx} != {pmiss.ctx}'
@@ -1368,7 +1368,8 @@ class ApplRule(DerivationRule):
     fn = p_fn.stmt.subj
     arg = p_arg.stmt.subj
     expr = Expression(Apply(fn, arg))
-    return Judgement(p_fn.ctx.Intersect(p_arg.ctx), Statement(expr, expr.typ))
+    assert p_fn.ctx == p_arg.ctx
+    return Judgement(p_fn.ctx, Statement(expr, expr.typ))
 
 
 class AbstRule(DerivationRule):
@@ -1434,8 +1435,7 @@ class Abst2Rule(DerivationRule):
 
 
 class Derivation:
-  def __init__(self, ctx: Context):
-    self.ctx = ctx
+  def __init__(self):
     self.rules: list[DerivationRule] = []
     self.conclusions: list[Judgement] = []
 
@@ -1445,11 +1445,11 @@ class Derivation:
     self.conclusions.append(concl)
     return concl
 
-  def VarRule(self, u: Var) -> Judgement:
+  def VarRule(self, ctx: Context, u: Var) -> Judgement:
     for i, rule in enumerate(self.rules):
-      if isinstance(rule, VarRule) and rule.u == u:
+      if isinstance(rule, VarRule) and rule.u == u and rule.ctx == ctx:
         return self.conclusions[i]
-    return self._AddRule(VarRule(self.ctx, u))
+    return self._AddRule(VarRule(ctx, u))
 
   def ApplRule(self, fn: Judgement, arg: Judgement) -> Judgement:
     assert fn in self.conclusions
@@ -1459,14 +1459,13 @@ class Derivation:
   def AbstRule(self, arg: Var, body: Judgement) -> Judgement:
     assert body in self.conclusions
     concl = self._AddRule(AbstRule(arg, body))
-    self.ctx = concl.ctx
     return concl
 
-  def FormRule(self, t: Type) -> Judgement:
+  def FormRule(self, ctx: Context, t: Type) -> Judgement:
     for i, rule in enumerate(self.rules):
       if isinstance(rule, FormRule) and rule.u == t:
         return self.conclusions[i]
-    return self._AddRule(FormRule(self.ctx, t))
+    return self._AddRule(FormRule(ctx, t))
 
   def Appl2Rule(self, fn: Judgement, arg: Judgement) -> Judgement:
     assert fn in self.conclusions
@@ -1476,7 +1475,6 @@ class Derivation:
   def Abst2Rule(self, arg: TypeVar, body: Judgement) -> Judgement:
     assert body in self.conclusions
     concl = self._AddRule(Abst2Rule(arg, body))
-    self.ctx = concl.ctx
     return concl
 
   def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
@@ -1518,46 +1516,23 @@ class Derivation:
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
-    var_abst_order: list[Optional[Var]] = []
-    typ_abst_order: list[Optional[TypeVar]] = []
-    for rule in self.rules:
-      if isinstance(rule, Abst2Rule):
-        typ_abst_order.append(rule.arg)
-        var_abst_order.append(Var('', TypeVar('')))
-      if isinstance(rule, AbstRule):
-        var_abst_order.append(rule.arg)
-        typ_abst_order.append(TypeVar(''))
-    reverse = lambda lst: list(reversed(lst))
-    var_abst_order = reverse(var_abst_order)
-    typ_abst_order = reverse(typ_abst_order)
-    def _SortKey(
-        decl: Union[Declaration, TypeDeclaration],
-        var_abst_order: list[Var],
-        typ_abst_order: list[TypeVar]
-    ):
-      try:
-        match decl:
-          case Declaration():
-            return var_abst_order.index(decl.subj.var)
-          case TypeDeclaration():
-            return typ_abst_order.index(decl.subj.typ)
-          case _:
-            raise NotImplementedError(f'Unexpected input to SortKey {decl}')
-      except ValueError:
-        return -1
-    declarations = sorted(
-        self.conclusions[0].ctx.typ_declarations
-        + self.conclusions[0].ctx.var_declarations,
-        key=lambda d: _SortKey(d, var_abst_order, typ_abst_order)
-    )
+    declarations = [
+        decl.subj.typ
+        for decl in self.conclusions[-1].ctx.typ_declarations
+    ]
+    declarations += [
+        decl.subj.var
+        for decl in self.conclusions[-1].ctx.var_declarations
+    ]
+    for rule in self.rules[::-1]:
+      if isinstance(rule, AbstRule) or isinstance(rule, Abst2Rule):
+        declarations.append(rule.arg)
     for decl in declarations:
       key = chr(ord('a') + len(keys))
-      if isinstance(decl, TypeDeclaration):
-        keys[decl.subj.typ] = key
-      else:
-        assert isinstance(decl, Declaration)
-        keys[decl.subj.var] = key
+      keys[decl] = key
       indent = '| ' * indent_count
+      if isinstance(decl, TypeVar):
+        decl = BindingTypeVar(decl)
       seperator = (
           ' ' * len(f'({key}) ')
           + '| ' * indent_count
@@ -1588,90 +1563,48 @@ class Derivation:
 
 
 def DeriveTerm(jdgmnt: Judgement) -> Derivation:
-  term_vars: list[Union[Var, TypeVar]] = []
-  def _FindVars(M: Expression):
+  d = Derivation()
+  def _Helper(ctx: Context, M: Expression) -> DerivationRule:
     match M.term:
       case FreeVar():
-        assert jdgmnt.ctx.ContainsVar(M.term.var)
-      case BoundVar():
-        pass
-      case AbstractT():
-        term_vars.append(M.term.arg.typ)
-        _FindVars(M.term.body)
-      case Abstract():
-        term_vars.append(M.term.arg.var)
-        _FindVars(M.term.body)
-      case ApplyT():
-        term_vars.append(M.term.arg.Type())
-        _FindVars(M.term.fn)
-      case Apply():
-        _FindVars(M.term.fn)
-        _FindVars(M.term.arg)
-      case _:
-        raise ValueError(f'Unexpected term {M.term}')
-  _FindVars(Expression(jdgmnt.stmt.subj))
-  term_vars = [
-      u for u in term_vars
-      if (
-          (isinstance(u, Var) or isinstance(u, TypeVar))
-          and not jdgmnt.ctx.ContainsVar(u)
-      )
-  ]
-  ctx = jdgmnt.ctx.PushVars(*term_vars)
-  d = Derivation(ctx)
-  def _Helper(M: Expression) -> DerivationRule:
-    match M.term:
-      case FreeVar():
-        return d.VarRule(M.term.var)
+        return d.VarRule(ctx, M.term.var)
       case BoundVar():
         raise ValueError(f'Should not need rule for bound variable {M.term}')
       case ApplyT():
-        arg_premiss = d.FormRule(M.term.arg)
-        return d.Appl2Rule(_Helper(M.term.fn), arg_premiss)
+        return d.Appl2Rule(_Helper(ctx, M.term.fn), d.FormRule(ctx, M.term.arg))
       case Apply():
-        return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
+        return d.ApplRule(_Helper(ctx, M.term.fn), _Helper(ctx, M.term.arg))
       case AbstractT():
-        return d.Abst2Rule(M.term.arg.typ, _Helper(Expression(M.term.body)))
+        body = _Helper(
+            ctx.PushTypeVar(M.term.arg.typ), Expression(M.term.body)
+        )
+        return d.Abst2Rule(M.term.arg.typ, body)
       case Abstract():
-        return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
+        body = _Helper(ctx.PushVar(M.term.arg.var), Expression(M.term.body))
+        return d.AbstRule(M.term.arg.var,  body)
       case _:
         raise NotImplementedError(f'Unexpected subject in judgement {M}')
-  _Helper(Expression(jdgmnt.stmt.subj))
+  _Helper(jdgmnt.ctx, Expression(jdgmnt.stmt.subj))
   return d
 
 
 def DeriveType(jdgmnt: Judgement) -> Derivation:
   term_vars: list[Union[Var, TypeVar]] = []
-  def _FindTypeVars(T: ExpressionType):
+  d = Derivation()
+  def _Helper(ctx: Context, T: ExpressionType) -> DerivationRule:
     match T.typ:
       case FreeTypeVar():
-        assert jdgmnt.ctx.ContainsVar(T.Type())
-      case BoundTypeVar():
-        pass
-      case PiType():
-        term_vars.append(T.typ.arg.typ)
-        _FindTypeVars(T.typ.body)
-      case Arrow():
-        _FindTypeVars(T.typ.arg)
-        _FindTypeVars(T.typ.ret)
-      case _:
-        raise ValueError(f'Unexpected term {M.term}')
-  _FindTypeVars(ExpressionType(jdgmnt.stmt.subj))
-  ctx = jdgmnt.ctx.PushVars(*term_vars)
-  d = Derivation(ctx)
-  def _Helper(T: ExpressionType) -> DerivationRule:
-    match T.typ:
-      case FreeTypeVar():
-        return d.FormRule(T.typ.typ)
+        return d.FormRule(ctx, T.typ.typ)
       case BoundTypeVar():
         raise ValueError(f'Should not need rule for bound type {T.typ}')
       case PiType():
-        return d.Abst2Rule(T.typ.arg.typ, _Helper(ExpressionType(T.typ.body)))
+        body = _Helper(ctx.PushTypeVar(T.typ.arg.typ), ExpressionType(T.typ.body))
+        return d.Abst2Rule(T.typ.arg.typ, body)
       case Arrow():
         _Helper(T.typ.arg)
         _Helper(T.typ.ret)
-        return d.FormRule(T.typ)
-  _Helper(ExpressionType(jdgmnt.stmt.subj))
+        return d.FormRule(ctx, T.typ)
+  _Helper(jdgmnt.ctx, ExpressionType(jdgmnt.stmt.subj))
   return d
 
 
@@ -1791,5 +1724,5 @@ def FindTerm(
         except TermNotFoundError:
           continue
     raise TermNotFoundError(f'Could not find term for {typ}')
-  ctx, term = _Helper(ctx, typ, set(), new_vars)
+  _, term = _Helper(ctx, typ, set(), new_vars)
   return term, DeriveTerm(Judgement(ctx, Statement(term, typ)))
