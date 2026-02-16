@@ -111,7 +111,7 @@ Dom(Ø): Ø
 Γ: x:ρ, y:σ, z:τ
 Ø < [x:ρ, z:τ] < Γ: True
 [z:τ, y:σ, x:ρ] == Γ: True
-Γ | [z:τ, u:γ, x:ρ]: z:τ, x:ρ
+Γ | [z:τ, u:γ, x:ρ]: x:ρ, z:τ
 
 Examples of topics in 2.11
 Rename

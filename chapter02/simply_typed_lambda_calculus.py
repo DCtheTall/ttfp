@@ -453,8 +453,7 @@ class AbstRule(DerivationRule):
 
 
 class Derivation:
-  def __init__(self, ctx: Context):
-    self.ctx = ctx
+  def __init__(self):
     self.rules: list[DerivationRule] = []
     self.conclusions: list[Judgement] = []
 
@@ -464,8 +463,8 @@ class Derivation:
     self.conclusions.append(concl)
     return concl
 
-  def VarRule(self, u: Var) -> Judgement:
-    return self._AddRule(VarRule(self.ctx, u))
+  def VarRule(self, ctx: Context, u: Var) -> Judgement:
+    return self._AddRule(VarRule(ctx, u))
 
   def ApplRule(self, fn: Judgement, arg: Judgement) -> Judgement:
     assert fn in self.conclusions
@@ -476,7 +475,6 @@ class Derivation:
   def AbstRule(self, arg: Var, body: Judgement) -> Judgement:
     assert body in self.conclusions
     concl = self._AddRule(AbstRule(arg, body))
-    self.ctx = concl.ctx
     return concl
 
   def _Justification(self, rule: DerivationRule, keys: dict[Judgement, str]) -> str:
@@ -511,7 +509,7 @@ class Derivation:
     keys: dict[Judgement, str] = {}
     declarations = [
         decl.subj.var
-        for decl in self.ctx.declarations
+        for decl in self.conclusions[-1].ctx.declarations
     ]
     for rule in self.rules[::-1]:
       if isinstance(rule, AbstRule):
@@ -550,22 +548,21 @@ class Derivation:
 
 
 def DeriveTerm(jdgmnt: Judgement) -> Derivation:
-  d = Derivation(jdgmnt.ctx)
-  def _Helper(M: Expression) -> DerivationRule:
+  d = Derivation()
+  def _Helper(ctx: Context, M: Expression) -> DerivationRule:
     match M.term:
       case FreeVar():
-        return d.VarRule(M.term.var)
+        return d.VarRule(ctx, M.term.var)
       case BoundVar():
         raise ValueError(f'Should not need rule for bound variable {M.term}')
       case Apply():
-        return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
+        return d.ApplRule(_Helper(ctx, M.term.fn), _Helper(ctx, M.term.arg))
       case Abstract():
-        d.ctx = d.ctx.PushVar(M.term.arg.var)
-        body = _Helper(Expression(M.term.body))
+        body = _Helper(ctx.PushVar(M.term.arg.var), Expression(M.term.body))
         return d.AbstRule(M.term.arg.var, body)
       case _:
         raise NotImplementedError(f'Unexpected subject in judgement {M}')
-  _Helper(Expression(jdgmnt.stmt.subj))
+  _Helper(jdgmnt.ctx, Expression(jdgmnt.stmt.subj))
   return d
 
 
