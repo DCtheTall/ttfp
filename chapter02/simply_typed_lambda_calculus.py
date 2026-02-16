@@ -390,7 +390,7 @@ class DerivationRule:
     if premisses:
       ctx = premisses[0].ctx
       for pmiss in premisses:
-        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+        if ctx != pmiss.ctx:
           raise ValueError(
               'Cannot use different Contexts in premisses of '
               f'the same DerivationRule: {ctx} != {pmiss.ctx}'
@@ -509,23 +509,16 @@ class Derivation:
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
-    abst_order: list[Var] = []
-    for rule in self.rules:
+    declarations = [
+        decl.subj.var
+        for decl in self.ctx.declarations
+    ]
+    for rule in self.rules[::-1]:
       if isinstance(rule, AbstRule):
-        abst_order.append(rule.arg)
-    abst_order = list(reversed(abst_order))
-    def _SortKey(decl: Declaration, abst_order: list[Var]):
-      try:
-        return abst_order.index(decl.subj.var)
-      except ValueError:
-        return -1
-    declarations = sorted(
-        self.conclusions[0].ctx.declarations,
-        key=lambda d: _SortKey(d, abst_order)
-    )
+        declarations.append(rule.arg)
     for decl in declarations:
       key = chr(ord('a') + len(keys))
-      keys[decl.subj.var] = key
+      keys[decl] = key
       indent = '| ' * indent_count
       seperator = (
           ' ' * len(f'({key}) ')
@@ -557,24 +550,7 @@ class Derivation:
 
 
 def DeriveTerm(jdgmnt: Judgement) -> Derivation:
-  term_vars: list[Var] = []
-  def _FindVars(M: Expression):
-    match M.term:
-      case FreeVar():
-        assert jdgmnt.ctx.ContainsVar(M.term.var)
-      case BoundVar():
-        pass
-      case Abstract():
-        term_vars.append(M.term.arg.var)
-        _FindVars(M.term.body)
-      case Apply():
-        _FindVars(M.term.fn)
-        _FindVars(M.term.arg)
-      case _:
-        raise ValueError(f'Unexpected term {M.term}')
-  _FindVars(Expression(jdgmnt.stmt.subj))
-  ctx = jdgmnt.ctx.PushVars(*term_vars)
-  d = Derivation(ctx)
+  d = Derivation(jdgmnt.ctx)
   def _Helper(M: Expression) -> DerivationRule:
     match M.term:
       case FreeVar():
@@ -584,7 +560,9 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case Apply():
         return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
       case Abstract():
-        return d.AbstRule(M.term.arg.var, _Helper(Expression(M.term.body)))
+        d.ctx = d.ctx.PushVar(M.term.arg.var)
+        body = _Helper(Expression(M.term.body))
+        return d.AbstRule(M.term.arg.var, body)
       case _:
         raise NotImplementedError(f'Unexpected subject in judgement {M}')
   _Helper(Expression(jdgmnt.stmt.subj))
