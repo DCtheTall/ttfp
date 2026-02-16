@@ -1617,3 +1617,50 @@ class ConvRule(DerivationRule):
   
   def Conclusion(self) -> Judgement:
     return Judgement(self.ctx, Statement(self.abprime))
+
+
+class Derivation:
+  def __init__(self, ctx: Context):
+    # All derivations in this system start with (sort).
+    self.ctx = ctx
+    self.rules: list[DerivationRule] = []
+    self.conclusions: list[Judgement] = []
+    self.SortRule()
+
+  def _AddRule(self, rule: DerivationRule) -> Judgement:
+    self.rules.append(rule)
+    self.rules[-1].ctx = self.ctx
+    concl = rule.Conclusion()
+    self.ctx = concl.ctx
+    self.conclusions.append(concl)
+    return concl
+
+  def SortRule(self) -> Judgement:
+    self._AddRule(SortRule(self.ctx))
+
+  def SortRulePremiss(self) -> Judgement:
+    if isinstance(self.rules[-1], SortRule):
+      return self.conclusions[-1]
+    return self.SortRule()
+
+  def VarRule(self, u: Union[TypeVar, Var]):
+    pass
+
+  def WeakRule(
+      self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement
+  ) -> Judgement:
+    pass
+
+  def FormRule(self, p_a: Judgement, p_b: Judgement) -> Judgement:
+    pass
+
+  def ApplRule(self, p_mxab: Judgement, p_na: Judgement) -> Judgement:
+    pass
+
+  def AbstRule(
+      self, arg: Union[TypeVar, Var], p_xamb: Judgement, p_abs: Judgement
+  ) -> Judgement:
+    pass
+
+  def ConvRule(self, p_ab: Judgement, p_bs: Judgement) -> Judgement:
+    pass
