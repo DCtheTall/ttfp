@@ -1149,21 +1149,8 @@ class Context:
         self.ContainsTypeVar(alpha.typ) for alpha in FreeTypeVars(rho)
     )
 
-  def Prefix(self, u: Union[Var, TypeVar]):
-    match u:
-      case TypeVar():
-        types = []
-        for t in self.Dom().types:
-          if u == t:
-            return Context(*types)
-          types.append(t)
-      case Var():
-        term_vars = []
-        for v in self.Dom().vars:
-          if u == v:
-            return Context(*self.Dom().types, *term_vars)
-          term_vars.append(v)
-    raise ValueError(f'Context {self} does not contain {u}')
+  def Empty(self) -> bool:
+    return len(self.Dom()) == 0
 
 
 class Judgement:
@@ -1316,7 +1303,10 @@ class WeakRule(DerivationRule):
       case Var():
         if not self.ctx.ContainsVar(self.u):
           ctx = self.ctx.PushVar(self.u)
-        subj = p_ab.stmt.subj.Copy()
+        if isinstance(p_ab.stmt.subj, Kind):
+          subj = p_ab.stmt.subj
+        else:
+          subj = p_ab.stmt.subj.Copy()
     return Judgement(ctx, Statement(subj))
 
 
@@ -1527,8 +1517,24 @@ class Derivation:
           and concl.stmt.subj == kind
       ):
         return concl
+    if ctx.Empty():
+      return None
     p_k = self.PremissForKind(Context(), kind)
+    if p_k is None:
+      return None
     return self._WeakenToContext(p_k, ctx)
+
+  def PremissForType(self, ctx: Context, typ: Typ) -> Optional[Judgement]:
+    for concl in self.conclusions:
+      if (
+          isinstance(concl.stmt.subj, Type)
+          and concl.stmt.subj == typ
+      ):
+        if concl.ctx == ctx:
+          return concl
+        if concl.ctx < ctx:
+          return self._WeakenToContext(concl, ctx)
+    return None
 
   def _WeakenToContext(self, premiss: Judgement, ctx: Context) -> Judgement:
     cur_p = premiss
@@ -1536,46 +1542,57 @@ class Derivation:
       if premiss.ctx.ContainsTypeVar(t):
         continue
       cur_p = self._ApplyCorrectWeakening(t, cur_p)
-    # TODO term vars
+    for u in ctx.Dom().vars:
+      if premiss.ctx.ContainsVar(u):
+        continue
+      cur_p =  self._ApplyCorrectWeakening(u, cur_p)
     return cur_p
 
   def _ApplyCorrectWeakening(
       self, u: Union[TypeVar, Var], premiss: Judgement
   ) -> Judgement:
     if isinstance(u, TypeVar):
-      p_v = self.PremissForKind(Context(), u.kind)
-      p_v = self._WeakenToContext(p_v, premiss.ctx)
+      p_v = self.PremissForKind(premiss.ctx, u.kind)
+      assert p_v is not None
       return self.WeakRule(u, premiss, p_v)
     assert isinstance(u, Var)
-    # TODO term vars
-    pass
-
-  def _AlignPremiss(self, premiss: Judgement, target_ctx: Context):
-    for t in target_ctx.Dom().types:
-      if not premiss.ctx.ContainsTypeVar(t):
-        premiss = self._ApplyCorrectWeakening(t, premiss)
-    # TODO term vars
-    return premiss
+    p_v = self.PremissForType(premiss.ctx, u.typ)
+    assert p_v is not None
+    return  self.WeakRule(u, premiss, p_v)
 
   def WeakenContexts(
       self, p_a: Judgement, p_b: Judgement
   ) -> tuple[Judgement, Judgement]:
     if p_a.ctx == p_b.ctx:
-      return p_a, p_body
+      return p_a, p_b
     
-    for u in p_b.ctx.Dom().types:
-      if p_a.ctx.ContainsTypeVar(u):
+    for t in p_b.ctx.Dom().types:
+      if p_a.ctx.ContainsTypeVar(t):
         continue
-      p_v = self.PremissForKind(p_a.ctx, u.kind)
-      p_v = self._AlignPremiss(p_v, p_a.ctx)
-      p_a = self.WeakRule(u, p_a, p_v)
+      p_v = self.PremissForKind(p_a.ctx, t.kind)
+      assert p_v is not None
+      p_a = self.WeakRule(t, p_a, p_v)
 
-    for u in p_a.ctx.Dom().types:
-      if p_b.ctx.ContainsTypeVar(u):
+    for u in p_b.ctx.Dom().vars:
+      if p_a.ctx.ContainsVar(u):
         continue
-      p_v = self.PremissForKind(p_b.ctx, u.kind)
-      p_v = self._AlignPremiss(p_v, p_b.ctx)
-      p_b = self.WeakRule(u, p_b, p_v)
+      p_t = self.PremissForType(p_a.ctx, u.typ)
+      assert p_t is not None
+      p_a = self.WeakRule(u, p_a, p_t)
+
+    for t in p_a.ctx.Dom().types:
+      if p_b.ctx.ContainsTypeVar(t):
+        continue
+      p_v = self.PremissForKind(p_b.ctx, t.kind)
+      assert p_v is not None
+      p_b = self.WeakRule(t, p_b, p_v)
+
+    for u in p_a.ctx.Dom().vars:
+      if p_b.ctx.ContainsVar(u):
+        continue
+      p_t = self.PremissForType(p_b.ctx, u.typ)
+      assert p_t is not None
+      p_b = self.WeakRule(u, p_b, p_t)
   
     return p_a, p_b
 
@@ -1756,7 +1773,6 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
         p_body, p_k = d.WeakenContexts(p_body, p_k)
         return d.AbstRule(T.typ.arg.typ, p_body, p_k)
   _Helper(Context(), TypeExpression(jdgmnt.stmt.subj))
-  assert jdgmnt.ctx == d.conclusions[-1].ctx
   return d
 
 
@@ -1765,72 +1781,55 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
   d = Derivation()
   def _Helper(ctx: Context, M: Expression):
-    # # Currently assumes β-normal form is in context.
-    # # Does not support when the context has the unreduced form.
-    # if not M.term.typ.BetaNormal():
-    #   t = BetaReduceType(TypeExpression(M.typ))
-    #   N = M.Copy()
-    #   N.SetType(t)
-    #   _Helper(ctx, N)
-    #   p1 = d.conclusions[-1]
-    #   ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-    #   d.AppendRules(
-    #       DeriveType(Judgement(Context(*ctx_types), Statement(M.term.typ)))
-    #   )
-    #   p2 = d.conclusions[-1]
-    #   return d.ConvRule(p1, p2)
+    # Currently assumes β-normal form is in context.
+    # Does not support when the context has the unreduced form.
+    if not M.term.typ.BetaNormal():
+      t = BetaReduceType(TypeExpression(M.typ))
+      N = M.Copy()
+      N.SetType(t)
+      _Helper(ctx, N)
+      p1 = d.conclusions[-1]
+      dt = DeriveType(Judgement(Context(), Statement(M.term.typ)))
+      d.rules += dt.rules
+      d.conclusions += dt.conclusions
+      p2 = d.conclusions[-1]
+      p1, p2 = d.WeakenContexts(p1, p2)
+      return d.ConvRule(p1, p2)
 
-    # match M.term:
-    #   case FreeVar():
-    #     p_t = d.PremissForType(ctx, M.typ)
-    #     if p_t is None:
-    #       dt = DeriveType(Judgement(Context(), Statement(M.typ)))
-    #       d.rules += dt.rules
-    #       d.conclusions += dt.conclusions
-    #       p_t = d.conclusions[-1]
-    #     return d.VarRule(p_t, M.term.var)
-    #   case BoundVar():
-    #     raise ValueError(f'Should not need rule for bound var {M.term}')
-    #   case Apply():
-    #     p_m = _Helper(ctx, M.term.fn)
-    #     p_n = _Helper(ctx, M.term.arg)
-    #     p_m, p_n = d.WeakenContexts(p_m, p_n)
-    #     return d.ApplRule(p_m, p_n)
-    #   case Abstract():
-    #     pass
-  
-    # match M.term:
-    #   case FreeVar():
-    #     if d.PremissForType(ctx, TypeExpression(M.typ)) is None:
-    #       d.AppendRules(
-    #           DeriveType(Judgement(ctx, Statement(M.typ)))
-    #       )
-    #       ctx = d.conclusions[-1].ctx
-    #       assert d.PremissForType(ctx, TypeExpression(M.typ)) is not None, d.LinearFormat()
-    #     return d.VarRule(d.PremissForType(ctx, TypeExpression(M.typ)), M.term.var)
-    #   case BoundVar():
-    #     raise ValueError(f'Should not need rule for bound var {M.term}')
-    #   case Apply():
-    #     p_m = _Helper(ctx, M.term.fn)
-    #     p_n = _Helper(ctx, M.term.arg)
-    #     p_m, p_n = d.WeakenContexts(p_m, p_n)
-    #     return d.ApplRule(p_m, p_n)
-    #   case Abstract():
-    #     if d.PremissForType(ctx, TypeExpression(M.term.arg.typ)) is None:
-    #       ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-    #       d.AppendRules(
-    #           DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
-    #       )
-    #     d.VarRule(M.term.arg.var)
-    #     p_body = _Helper(ctx, Expression(M.term.body))
-    #     p_t = d.PremissForType(ctx, TypeExpression(M.Type()))
-    #     if p_t is None:
-    #       ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-    #       d.AppendRules(
-    #           DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
-    #       )
-    #       p_t = d.conclusions[-1]
-    #     return d.AbstRule(M.term.arg.var, p_body, p_t)
+    match M.term:
+      case FreeVar():
+        p_t = d.PremissForType(ctx, M.typ)
+        if p_t is None:
+          dt = DeriveType(Judgement(Context(), Statement(M.typ)))
+          d.rules += dt.rules
+          d.conclusions += dt.conclusions
+          p_t = d.conclusions[-1]
+        return d.VarRule(p_t, M.term.var)
+      case BoundVar():
+        raise ValueError(f'Should not need rule for bound var {M.term}')
+      case Apply():
+        p_m = _Helper(ctx, M.term.fn)
+        p_n = _Helper(ctx, M.term.arg)
+        p_m, p_n = d.WeakenContexts(p_m, p_n)
+        return d.ApplRule(p_m, p_n)
+      case Abstract():
+        p_fn_t = d.PremissForType(ctx, TypeExpression(M.Type()))
+        if p_fn_t is None:
+          dt = DeriveType(Judgement(Context(), Statement(TypeExpression(M.Type()))))
+          d.rules += dt.rules
+          d.conclusions += dt.conclusions
+          p_fn_t = d.conclusions[-1]
+        p_body = _Helper(ctx.PushVar(M.term.arg.var), Expression(M.term.body))
+        p_t = d.PremissForType(ctx, M.term.arg.var.typ)
+        if p_t is None:
+          dt = DeriveType(Judgement(Context(), Statement(M.term.arg.var.typ)))
+          d.rules += dt.rules
+          d.conclusions += dt.conclusions
+          p_t = d.conclusions[-1]
+        p_arg = d.VarRule(p_t, M.term.arg.var)
+        p_arg, p_body = d.WeakenContexts(p_arg, p_body)
+        p_body, p_fn_t = d.WeakenContexts(p_body, p_fn_t)
+        return d.AbstRule(M.term.arg.var, p_body, p_fn_t)
     pass
   _Helper(jdgmnt.ctx, Expression(jdgmnt.stmt.subj))
   return d
