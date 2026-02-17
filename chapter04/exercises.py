@@ -10,7 +10,7 @@ from dependent_types_lambda_calculus import (
     Context,
     DeriveKind,
     DeriveType,
-    # DeriveTerm,
+    DeriveTerm,
     Expression,
     Judgement,
     KArrow,
