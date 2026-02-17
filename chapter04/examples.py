@@ -6,10 +6,15 @@ Chapter 4 Examples
 
 from dependent_types_lambda_calculus import (
     Context,
+    ConvRule,
     Derivation,
+    Expression,
+    FormRule,
+    Judgement,
     KArrow,
     SortRule,
     Star,
+    Statement,
     TAbstract,
     TApply,
     TArrow,
@@ -39,52 +44,53 @@ def RunExamples():
 
   print('\nExample of 4.2.1')
   print('Sort rule:')
-  print(SortRule(Context()))
+  print(SortRule())
 
 
   print('\nExample of 4.2.2')
   print('Var rule for type:')
   alpha = TypeVar('α', Star())
   ctx = Context()
-  premiss = SortRule(ctx).Conclusion()
+  premiss = SortRule().Conclusion()
   print(VarRule(premiss, alpha))
   print('Var rule for term:')
   ctx = Context()
   x = Var('x', alpha)
-  premiss1 = SortRule(ctx).Conclusion()
+  premiss1 = SortRule().Conclusion()
   premiss2 = VarRule(premiss1, alpha).Conclusion()
   print(VarRule(premiss2, x))
 
 
   print('\nExample 4.2.3')
-  deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
-  ii = deriv.VarRule(x)
+  ctx = Context()
+  deriv = Derivation()
+  i = deriv.VarRule(deriv.SortRulePremiss(), alpha)
+  ii = deriv.VarRule(i, x)
   print(deriv.LinearFormat())
-  # TODO flag format
 
 
   print('\nExamples from 4.3.2')
   print('First derivation (?1):')
-  deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
+  deriv = Derivation()
+  i = deriv.VarRule(deriv.SortRulePremiss(), alpha)
   ii = deriv.WeakRule(x, i, i)
   print(deriv.LinearFormat())
   print('Second derivation (?2):')
-  deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
+  deriv = Derivation()
+  i = deriv.VarRule(deriv.SortRulePremiss(), alpha)
   beta = TypeVar('β', Star())
-  ii = deriv.WeakRule(beta, i, deriv.SortRulePremiss())
+  ii = deriv.WeakRule(alpha, deriv.SortRulePremiss(), deriv.SortRulePremiss())
+  iii = deriv.WeakRule(beta, i, ii)
   print(deriv.LinearFormat())
   print('Third derivation (?3):')
-  deriv = Derivation(Context())
+  deriv = Derivation()
   i = deriv.WeakRule(
       alpha, deriv.SortRulePremiss(), deriv.SortRulePremiss()
   )
-  ii = deriv.VarRule(beta)
+  ii = deriv.VarRule(i, beta)
   print(deriv.LinearFormat())
   print('Fourth derivation (?4):')
-  deriv = Derivation(Context())
+  deriv = Derivation()
   i = deriv.WeakRule(
       alpha, deriv.SortRulePremiss(), deriv.SortRulePremiss()
   )
@@ -92,37 +98,48 @@ def RunExamples():
 
 
   print('\nExample from 4.4.1')
-  deriv = Derivation(Context())
-  i = deriv.VarRule(alpha)
-  ii = deriv.VarRule(beta)
-  iii = deriv.FormRule(i, ii)
-  iv = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
-  print(deriv.LinearFormat())
+  ctx = Context(alpha, beta)
+  p_a = Judgement(ctx, Statement(TypeExpression(alpha)))
+  p_b = Judgement(ctx, Statement(TypeExpression(beta)))
+  print(FormRule(p_a, p_b))
+  print('---')
+  ctx = Context(alpha)
+  p_a = Judgement(ctx, Statement(Star()))
+  p_b = Judgement(ctx, Statement(Star()))
+  print(FormRule(p_a, p_b))
 
 
   print('\nExamples from 4.5')
-  deriv = Derivation(Context())
-  ii = deriv.VarRule(beta)
-  i = deriv.VarRule(alpha)
+  deriv = Derivation()
+  i = deriv.VarRule(deriv.SortRulePremiss(), beta)
+  ii = deriv.VarRule(deriv.SortRulePremiss(), alpha)
   iii = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
-  iv = deriv.FormRule(i, i)
-  v = deriv.AbstRule(alpha, iv, iii)
-  vi = deriv.ApplRule(v, ii)
+  iv = deriv.FormRule(ii, ii)
+  v = deriv.WeakRule(alpha, iii, deriv.SortRulePremiss())
+  vi = deriv.AbstRule(alpha, iv, v)
+  vii = deriv.WeakRule(beta, vi, deriv.SortRulePremiss())
+  viii = deriv.ApplRule(vii, i)
   print(deriv.FlagFormat())
 
-  print('\nExample from 4.7')
-  deriv = Derivation(Context())
-  ii = deriv.VarRule(beta)
-  i = deriv.VarRule(alpha)
+
+  print('\nExample from 4.6')
+  deriv = Derivation()
+  i = deriv.VarRule(deriv.SortRulePremiss(), beta)
+  ii = deriv.VarRule(deriv.SortRulePremiss(), alpha)
   iii = deriv.FormRule(deriv.SortRulePremiss(), deriv.SortRulePremiss())
-  iv = deriv.FormRule(i, i)
-  v = deriv.AbstRule(alpha, iv, iii)
-  vi = deriv.ApplRule(v, ii)
+  iv = deriv.FormRule(ii, ii)
+  v = deriv.WeakRule(alpha, iii, deriv.SortRulePremiss())
+  vi = deriv.AbstRule(alpha, iv, v)
+  vii = deriv.WeakRule(beta, vi, deriv.SortRulePremiss())
+  viii = deriv.ApplRule(vii, i)
+  print(deriv.FlagFormat(shorten=True))
+
+  print('\nExample from 4.7')
   x = Var('x', TApply(TAbstract(alpha, TArrow(alpha, alpha)), beta))
-  vii = deriv.VarRule(x)
-  viii = deriv.FormRule(ii, ii)
-  ix = deriv.ConvRule(vii, viii)
-  print(deriv.FlagFormat())
+  ctx = Context(beta, x)
+  p_a = Judgement(ctx, Statement(Expression(x)))
+  p_b = Judgement(ctx, Statement(TypeExpression(TArrow(beta, beta))))
+  print(ConvRule(p_a, p_b))
 
 
 if __name__ == '__main__':

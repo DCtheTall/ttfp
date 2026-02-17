@@ -264,6 +264,8 @@ class TypeExpression(Type):
     return str(self.typ)
 
   def __eq__(self, other):
+    if not isinstance(other, Type):
+      return False
     return TAlphaEquiv(self, other)
 
   def Type(self) -> Type:
@@ -870,7 +872,9 @@ class Expression(Term):
     return str(self.term)
 
   def __eq__(self, other):
-    return AlphaEquiv(self, other)
+    if isinstance(other, Expression):
+      return self.typ == other.typ
+    return self.typ == other
 
   def Closed(self) -> bool:
     return len(FreeVars(self)) == 0
@@ -1170,7 +1174,7 @@ class DerivationRule:
     if premisses:
       ctx = premisses[0].ctx
       for pmiss in premisses:
-        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
+        if ctx != pmiss.ctx:
           raise ValueError(
               'Cannot use different Contexts in premisses of '
               f'the same DerivationRule: {ctx} != {pmiss.ctx}'
@@ -1191,12 +1195,11 @@ class DerivationRule:
 
 
 class SortRule(DerivationRule):
-  def __init__(self, ctx: Context):
+  def __init__(self):
     super().__init__()
-    self.ctx = ctx
 
   def Conclusion(self) -> Judgement:
-    return Judgement(self.ctx, Statement(Star()))
+    return Judgement(Context(), Statement(Star()))
 
 
 class VarRule(DerivationRule):
@@ -1248,24 +1251,34 @@ class WeakRule(DerivationRule):
     super().__init__(*premisses)
     p_ab, p_cs = self.premisses
     ab = p_ab.stmt.subj
-    match ab:
-      case Expression():
-        if not isinstance(ab.term, BoundVar):
-          raise TypeError(f'Invalid first premiss for WeakRule {p_ab}')
-      case TypeExpression():
-        assert isinstance(ab.typ, BoundTypeVar)
-      case Kind():
-        assert isinstance(ab, Kind)
-      case _:
-        raise NotImplementedError(
-            f'Unexpected premiss for WeakRule {p_ab}'
-        )
     cs = p_cs.stmt.subj
     match u:
       case Var():
         if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
           raise ValueError(f'Cannot redeclare variable {u}')
-        if not isinstance(cs, TypeExpression) or cs.Type() != u.Type():
+        if (
+            not isinstance(cs, TypeExpression) or
+            TypeExpression(cs.Type()) != TypeExpression(u.typ)
+        ):
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u}'
+          )
+      case TypeVar():
+        if p_ab.ctx.ContainsTypeVar(u) or p_cs.ctx.ContainsTypeVar(u):
+          raise ValueError(f'Cannot redeclare type variable {u}')
+        if not isinstance(cs, Kind) or cs != u.kind:
+          raise TypeError(
+              f'Invalid second premiss for WeakRule {p_cs} given {u}'
+          )
+    cs = p_cs.stmt.subj
+    match u:
+      case Var():
+        if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
+          raise ValueError(f'Cannot redeclare variable {u}')
+        if (
+            not isinstance(cs, TypeExpression) or
+            TypeExpression(cs.Type()) != TypeExpression(u.typ)
+        ):
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u}'
           )
@@ -1439,73 +1452,32 @@ class ConvRule(DerivationRule):
 
 
 class Derivation:
-  def __init__(self, ctx: Context):
-    # All derivations in this system start with (sort).
-    self.ctx = ctx
+  def __init__(self):
     self.rules: list[DerivationRule] = []
     self.conclusions: list[Judgement] = []
     self.SortRule()
 
-  def SortRulePremiss(self) -> Judgement:
-    if isinstance(self.rules[-1], SortRule):
-      return self.conclusions[-1]
-    return self._AddRule(SortRule(self.ctx))
-
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
-    self.rules[-1].ctx = self.ctx
     concl = rule.Conclusion()
-    self.ctx = concl.ctx
     self.conclusions.append(concl)
     return concl
 
-  def PremissForType(self, typ: Type):
-    for concl in self.conclusions:
-      if not isinstance(concl.stmt.subj, TypeExpression):
-        continue
-      if TypeExpression(typ) == TypeExpression(concl.stmt.subj):
-        return concl
-    return None
-
   def SortRule(self) -> Judgement:
-    sort_rule = SortRule(self.ctx)
+    sort_rule = SortRule()
     self.rules.append(sort_rule)
     concl = sort_rule.Conclusion()
     self.conclusions.append(concl)
     return concl
 
-  def VarRule(self, u: Union[TypeVar, Var]) -> Judgement:
-    premiss = None
+  def SortRulePremiss(self) -> Judgement:
+    return self.conclusions[0]
+
+  def VarRule(self, premiss: Judgement, u: Union[TypeVar, Var]) -> Judgement:
     for i, rule in enumerate(self.rules):
-      if isinstance(rule, FormRule) and premiss is None:
-        if isinstance(u, TypeVar):
-          if isinstance(rule.ab, Kind) and rule.ab == u.kind:
-            premiss = self.conclusions[i]
-        else:
-          assert isinstance(u, Var)
-          if (
-              isinstance(rule.ab, TypeExpression)
-              and rule.ab == TypeExpression(u.Type())
-          ):
-            premiss = self.conclusions[i]
-      if isinstance(rule, VarRule):
-        match (u, rule.u):
-          case (TypeVar(), TypeVar()):
-            if rule.u == u and self.ctx.ContainsTypeVar(u):
-              return self.conclusions[i]
-          case (Var(), Var()):
-            if rule.u == u and self.ctx.ContainsVar(u):
-              return self.conclusions[i]
-    if isinstance(u, Var):
-      assert u.Type().Proper()
-      premiss = self.PremissForType(u.Type())
-      assert premiss is not None
-    if premiss is None:
-      assert isinstance(u, TypeVar), type(u)
-      assert u.Proper(), u
-      if not isinstance(self.rules[-1], SortRule):
-        self.SortRule()
-      premiss = self.conclusions[-1]
+      for i, rule in enumerate(self.rules):
+        if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
+          return self.conclusions[i]
     return self._AddRule(VarRule(premiss, u))
 
   def WeakRule(
@@ -1513,7 +1485,6 @@ class Derivation:
   ) -> Judgement:
     assert p_ab in self.conclusions
     assert p_cs in self.conclusions
-    assert p_ab.ctx < self.ctx and p_cs.ctx < self.ctx
     return self._AddRule(WeakRule(u, p_ab, p_cs))
 
   def FormRule(self, p_a: Judgement, p_b: Judgement) -> Judgement:
@@ -1538,14 +1509,9 @@ class Derivation:
     assert p_bs in self.conclusions
     return self._AddRule(ConvRule(p_ab, p_bs))
 
-  def ContainsKind(self, kind) -> bool:
-    for concl in self.conclusions:
-      if isinstance(concl.stmt.subj, Kind) and concl.stmt.subj == kind:
-        return True
-    return False
-  
   def _Justification(
-      self, rule: DerivationRule, keys: dict[Judgement, str]
+      self, rule: DerivationRule, keys: dict[Judgement, str],
+      shorten = False,
   ) -> str:
     match rule:
       case SortRule():
@@ -1567,6 +1533,8 @@ class Derivation:
         return f'(appl) on ({mab_key}) and ({na_key})'
       case AbstRule():
         xamb_key = keys[rule.premisses[0]]
+        if shorten:
+          return f'(abst) on ({xamb_key})'
         abs_key = keys[rule.premisses[1]]
         return f'(abst) on ({xamb_key}) and ({abs_key})'
       case ConvRule():
@@ -1588,17 +1556,29 @@ class Derivation:
       result.append('-' * len(line))
     return '\n'.join(result)
 
-  def FlagFormat(self) -> str:
+  def FlagFormat(self, shorten = False) -> str:
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
-      key = chr(ord('a') + len(keys))
-      keys[concl] = key
-      justif = self._Justification(rule, keys)
+      if shorten and (
+          isinstance(rule, SortRule) or (
+              isinstance(rule, FormRule) and isinstance(concl.stmt.subj, Kind)
+          )
+      ):
+        keys[concl] = ''
+        justif = ''
+      elif shorten and isinstance(rule, WeakRule):
+        keys[concl] = keys[rule.premisses[0]]
+      else:
+        key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+        keys[concl] = key
+        justif = self._Justification(rule, keys, shorten)
       match rule:
         case SortRule():
+          if shorten:
+            continue
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case VarRule():
           if isinstance(concl.stmt.subj, TypeExpression):
@@ -1612,10 +1592,25 @@ class Derivation:
               + '|'
               + '-' * (len(str(decl)) + 3)
           )
-          line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
-          result.extend([seperator, line, seperator])
+          if shorten:
+            line = f'({key}) {indent}| {decl} |'
+          else:
+            line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
           indent_count += 1
-          indent = '| ' * indent_count
+          if shorten:
+            result.extend([seperator, line, seperator])
+            continue
+          else:
+            result.extend([seperator, line, seperator])
+            indent = '| ' * indent_count
+            line = f'({key}) {indent}{concl.stmt}    {justif}'
+        case WeakRule():
+          if shorten:
+            continue
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+        case FormRule():
+          if shorten and isinstance(rule.Conclusion().stmt.subj, Kind):
+            continue
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case AbstRule():
           indent_count -= 1
@@ -1627,171 +1622,382 @@ class Derivation:
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
 
-  def _PremissForVarIdx(self, u: Union[TypeVar, Var]):
-    for i, rule in enumerate(self.rules):
-      if not isinstance(rule, VarRule):
-        continue
-      match (u, rule.u):
-        case (TypeVar(), TypeVar()):
-          if u == rule.u:
-            return i
-        case (Var(), Var()):
-          if u == rule.u:
-            return i
-    raise ValueError(f'{u} not declared')
+# class Derivation:
+#   def __init__(self, ctx: Context):
+#     # All derivations in this system start with (sort).
+#     self.rules: list[DerivationRule] = []
+#     self.conclusions: list[Judgement] = []
+#     self.SortRule(ctx)
 
-  def AppendRules(self, other: 'Derivation'):
-    premiss_map: dict[str, int] = {}
-    def _LookupPremiss(premiss: Judgement):
-      return self.conclusions[premiss_map[str(premiss)]]
-    for rule in other.rules:
-      match rule:
-        case SortRule():
-          premiss_map[str(rule.Conclusion())] = 0
-          continue
-        case VarRule():
-          p = rule.premisses[0]
-          p = _LookupPremiss(p)
-          if isinstance(rule.u, TypeVar):
-            if self.ctx.ContainsTypeVar(rule.u):
-              premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
-                  rule.u
-              )
-              continue
-          else:
-            assert isinstance(rule.u, Var)
-            if self.ctx.ContainsVar(rule.u):
-              premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
-                  rule.u
-              )
-              continue
-          self._AddRule(VarRule(p, rule.u))
-        case WeakRule():
-          p1, p2 = rule.premisses
-          p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
-          self._AddRule(WeakRule(rule.u, p1, p2))
-        case FormRule():
-          p1, p2 = rule.premisses
-          p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
-          self._AddRule(FormRule(p1, p2))
-        case ApplRule():
-          p1, p2 = rule.premisses
-          p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
-          self._AddRule(ApplRule(p1, p2))
-        case AbstRule():
-          p1, p2 = rule.premisses
-          p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
-          self._AddRule(AbstRule(rule.arg, p1, p2))
-        case ConvRule():
-          p1, p2 = rule.premisses
-          p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
-          self._AddRule(ConvRule(p1, p2))
-      premiss_map[str(rule.Conclusion())] = len(self.rules) - 1
+#   def SortRulePremiss(self, ctx) -> Judgement:
+#     for rule, concl in zip(self.rules, self.conclusions):
+#       if isinstance(rule, SortRule) and concl.ctx == ctx:
+#         return concl
+#     return self._AddRule(SortRule(ctx))
+
+#   def _AddRule(self, rule: DerivationRule) -> Judgement:
+#     self.rules.append(rule)
+#     concl = rule.Conclusion()
+#     self.conclusions.append(concl)
+#     return concl
+
+#   def PremissForType(self, ctx: Context, typ: Type):
+#     for concl in self.conclusions:
+#       if not isinstance(concl.stmt.subj, TypeExpression):
+#         continue
+#       if ctx == concl.ctx and TypeExpression(typ) == TypeExpression(concl.stmt.subj):
+#         return concl
+#     return None
+
+#   def SortRule(self, ctx: Context) -> Judgement:
+#     sort_rule = SortRule(ctx)
+#     self.rules.append(sort_rule)
+#     concl = sort_rule.Conclusion()
+#     self.conclusions.append(concl)
+#     return concl
+
+#   def VarRule(
+#       self, premiss: Judgement, u: Union[TypeVar, Var]
+#   ) -> Judgement:
+#     for i, rule in enumerate(self.rules):
+#       for i, rule in enumerate(self.rules):
+#         if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
+#           return self.conclusions[i]
+#     return self._AddRule(VarRule(premiss, u))
+
+#   def WeakRule(
+#       self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement
+#   ) -> Judgement:
+#     assert p_ab in self.conclusions
+#     assert p_cs in self.conclusions
+#     assert p_ab.ctx == p_cs.ctx
+#     return self._AddRule(WeakRule(u, p_ab, p_cs))
+
+#   def FormRule(self, p_a: Judgement, p_b: Judgement) -> Judgement:
+#     assert p_a in self.conclusions
+#     assert p_b in self.conclusions
+#     return self._AddRule(FormRule(p_a, p_b))
+
+#   def ApplRule(self, p_mab: Judgement, p_na: Judgement) -> Judgement:
+#     assert p_mab in self.conclusions
+#     assert p_na in self.conclusions
+#     return self._AddRule(ApplRule(p_mab, p_na))
+
+#   def AbstRule(
+#       self, arg: Union[TypeVar, Var], p_xamb: Judgement, p_abs: Judgement
+#   ) -> Judgement:
+#     assert p_xamb in self.conclusions
+#     assert p_abs in self.conclusions
+#     return self._AddRule(AbstRule(arg, p_xamb, p_abs))
+
+#   def ConvRule(self, p_ab: Judgement, p_bs: Judgement) -> Judgement:
+#     assert p_ab in self.conclusions
+#     assert p_bs in self.conclusions
+#     return self._AddRule(ConvRule(p_ab, p_bs))
+
+#   def FindKind(self, kind) -> Optional[Judgement]:
+#     for concl in self.conclusions:
+#       if isinstance(concl.stmt.subj, Kind) and concl.stmt.subj == kind:
+#         return concl
+#     return None
+  
+#   def _Justification(
+#       self, rule: DerivationRule, keys: dict[Judgement, str]
+#   ) -> str:
+#     match rule:
+#       case SortRule():
+#         return '(sort)'
+#       case VarRule():
+#         typ_key = keys[rule.premisses[0]]
+#         return f'(var) on ({typ_key})'
+#       case WeakRule():
+#         ab_key = keys[rule.premisses[0]]
+#         cs_key = keys[rule.premisses[1]]
+#         return f'(weak) on ({ab_key}) and ({cs_key})'
+#       case FormRule():
+#         as_key = keys[rule.premisses[0]]
+#         bs_key = keys[rule.premisses[1]]
+#         return f'(form) on ({as_key}) and ({bs_key})'
+#       case ApplRule():
+#         mab_key = keys[rule.premisses[0]]
+#         na_key = keys[rule.premisses[1]]
+#         return f'(appl) on ({mab_key}) and ({na_key})'
+#       case AbstRule():
+#         xamb_key = keys[rule.premisses[0]]
+#         abs_key = keys[rule.premisses[1]]
+#         return f'(abst) on ({xamb_key}) and ({abs_key})'
+#       case ConvRule():
+#         ab_key = keys[rule.premisses[0]]
+#         bs_key = keys[rule.premisses[1]]
+#         return f'(conv) on ({ab_key}) and ({bs_key})'
+#       case _:
+#         raise ValueError(f'Unexpected input to Justification {rule}')
+
+#   def LinearFormat(self) -> str:
+#     result = []
+#     keys: dict[Judgement, str] = {}
+#     for rule, concl in zip(self.rules, self.conclusions):
+#       key = chr(ord('a') + len(keys))
+#       keys[concl] = key
+#       justif = self._Justification(rule, keys)
+#       line = f'({key}) {concl}    {justif}'
+#       result.append(line)
+#       result.append('-' * len(line))
+#     return '\n'.join(result)
+
+#   def FlagFormat(self) -> str:
+#     result = []
+#     indent_count = 0
+#     keys: dict[Judgement, str] = {}
+#     for rule, concl in zip(self.rules, self.conclusions):
+#       indent = '| ' * indent_count
+#       key = chr(ord('a') + len(keys))
+#       keys[concl] = key
+#       justif = self._Justification(rule, keys)
+#       match rule:
+#         case SortRule():
+#           line = f'({key}) {indent}{concl.stmt}    {justif}'
+#         case VarRule():
+#           if isinstance(concl.stmt.subj, TypeExpression):
+#             decl = concl.stmt.subj.Type()
+#           else:
+#             assert isinstance(concl.stmt.subj, Expression)
+#             decl = concl.stmt.subj.term.var
+#           seperator = (
+#               ' ' * len(f'({key}) ')
+#               + '| ' * indent_count
+#               + '|'
+#               + '-' * (len(str(decl)) + 3)
+#           )
+#           line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
+#           result.extend([seperator, line, seperator])
+#           indent_count += 1
+#           indent = '| ' * indent_count
+#           line = f'({key}) {indent}{concl.stmt}    {justif}'
+#         case AbstRule():
+#           indent_count -= 1
+#           indent = '| ' * indent_count
+#           line = f'({key}) {indent}{concl.stmt}    {justif}'
+#         case DerivationRule():
+#           line = f'({key}) {indent}{concl.stmt}    {justif}'
+#       result.append(line)
+#       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+#     return '\n'.join(result)
+
+#   def _PremissForVarIdx(self, u: Union[TypeVar, Var]):
+#     for i, rule in enumerate(self.rules):
+#       if not isinstance(rule, VarRule):
+#         continue
+#       match (u, rule.u):
+#         case (TypeVar(), TypeVar()):
+#           if u == rule.u:
+#             return i
+#         case (Var(), Var()):
+#           if u == rule.u:
+#             return i
+#     raise ValueError(f'{u} not declared')
+
+#   def AppendRules(self, other: 'Derivation'):
+#     premiss_map: dict[str, int] = {}
+#     def _LookupPremiss(premiss: Judgement):
+#       return self.conclusions[premiss_map[str(premiss)]]
+#     for rule in other.rules:
+#       match rule:
+#         case SortRule():
+#           concl = self.SortRulePremiss(self.conclusions[-1].ctx)
+#           premiss_map[str(rule.Conclusion())] = self.conclusions.index(concl)
+#           print(self.conclusions[self.conclusions.index(concl)])
+#           continue
+#         case VarRule():
+#           p = _LookupPremiss(rule.premisses[0])
+#           if isinstance(rule.u, TypeVar):
+#             if self.conclusions[-1].ctx.ContainsTypeVar(rule.u):
+#               premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
+#                   rule.u
+#               )
+#               continue
+#           else:
+#             assert isinstance(rule.u, Var)
+#             if self.conclusions[-1].ContainsVar(rule.u):
+#               premiss_map[str(rule.Conclusion())] = self._PremissForVarIdx(
+#                   rule.u
+#               )
+#               continue
+#           self._AddRule(VarRule(p, rule.u))
+#         case WeakRule():
+#           p1, p2 = rule.premisses
+#           p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
+#           self.WeakenContexts(p1, p2)
+#         case FormRule():
+#           p1, p2 = rule.premisses
+#           p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
+#           p1, p2 = self.WeakenContexts(p1, p2)
+#           self._AddRule(FormRule(p1, p2))
+#         case ApplRule():
+#           p1, p2 = rule.premisses
+#           p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
+#           p1, p2 = self.WeakenContexts(p1, p2)
+#           self._AddRule(ApplRule(p1, p2))
+#         case AbstRule():
+#           p1, p2 = rule.premisses
+#           p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
+#           p1, p2 = self.WeakenContexts(p1, p2)
+#           self._AddRule(AbstRule(rule.arg, p1, p2))
+#         case ConvRule():
+#           p1, p2 = rule.premisses
+#           p1, p2 = _LookupPremiss(p1), _LookupPremiss(p2)
+#           p1, p2 = self.WeakenContexts(p1, p2)
+#           self._AddRule(ConvRule(p1, p2))
+#       premiss_map[str(rule.Conclusion())] = len(self.rules) - 1
+  
+#   def WeakenContexts(
+#       self, p_a: Judgement, p_b: Judgement
+#   ) -> tuple[Judgement, Judgement]:
+#     if p_a.ctx == p_b.ctx:
+#       return p_a, p_b
+#     for concl in self.conclusions:
+#       if p_a.stmt.subj == concl.stmt.subj and concl.ctx == p_b.ctx:
+#         p_a = concl
+#         break
+#       if p_b.stmt.subj == concl.stmt.subj and concl.ctx == p_a.ctx:
+#         p_b = concl
+#         break
+
+#     for t in p_b.ctx.Dom().types:
+#       if not p_a.ctx.ContainsTypeVar(t):
+#         p_a = self.WeakRule(t, p_a, self.SortRulePremiss(p_a.ctx))
+#     for t in p_a.ctx.Dom().types:
+#       if not p_b.ctx.ContainsTypeVar(t):
+#         p_b = self.WeakRule(t, p_b, self.SortRulePremiss(p_b.ctx))
+
+#     for v in p_b.ctx.Dom().vars:
+#       if not p_a.ctx.ContainsVar(v):
+#         p_a = self.WeakRule(v, *self.WeakenContexts(p_a, self.PremissForType(v.typ)))
+#     for v in p_a.ctx.Dom().vars:
+#       if not p_b.ctx.ContainsVar(v):
+#         p_b = self.WeakRule(v, *self.WeakenContexts(p_b, self.PremissForType(v.typ)))
+
+#     return p_a, p_b
 
 
-def DeriveKind(jdgmnt: Judgement) -> Derivation:
-  if not isinstance(jdgmnt.stmt.subj, Kind):
-    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
-  d = Derivation(jdgmnt.ctx)
-  def _Helper(kind: Kind):
-    match kind:
-      case Star():
-        if isinstance(d.rules[-1], SortRule):
-          return d.conclusions[-1]
-        return d.SortRule()
-      case KArrow():
-        return d.FormRule(_Helper(kind.arg), _Helper(kind.ret))
-      case _:
-        raise NotImplementedError(f'Unexpected subject in judgement {jdgmnt}')
-  _Helper(jdgmnt.stmt.subj)
-  assert d.ctx == jdgmnt.ctx
-  return d
+# def DeriveKind(jdgmnt: Judgement) -> Derivation:
+#   if not isinstance(jdgmnt.stmt.subj, Kind):
+#     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+#   d = Derivation(jdgmnt.ctx)
+#   def _Helper(kind: Kind):
+#     match kind:
+#       case Star():
+#         if isinstance(d.rules[-1], SortRule):
+#           return d.conclusions[-1]
+#         return d.SortRule(d.conclusions[-1].ctx)
+#       case KArrow():
+#         return d.FormRule(_Helper(kind.arg), _Helper(kind.ret))
+#       case _:
+#         raise NotImplementedError(f'Unexpected subject in judgement {jdgmnt}')
+#   _Helper(jdgmnt.stmt.subj)
+#   return d
 
 
-def DeriveType(jdgmnt: Judgement) -> Derivation:
-  if not isinstance(jdgmnt.stmt.subj, TypeExpression):
-    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
-  d = Derivation(Context())
-  def _Helper(T: TypeExpression):
-    match T.typ:
-      case FreeTypeVar():
-        if not d.ContainsKind(T.kind):
-          d.AppendRules(
-              DeriveKind(Judgement(Context(), Statement(T.typ.kind)))
-          )
-        return d.VarRule(T.Type())
-      case BoundTypeVar():
-        raise ValueError(f'Should not need rule for bound type {T.typ}')
-      case TArrow():
-        return d.FormRule(_Helper(T.typ.arg), _Helper(T.typ.ret))
-      case TApply():
-        return d.ApplRule(_Helper(T.typ.fn), _Helper(T.typ.arg))
-      case TAbstract():
-        if not d.ctx.ContainsTypeVar(T.typ.arg.typ):
-          if not d.ContainsKind(T.typ.arg.typ.kind):
-            d.AppendRules(
-                DeriveKind(Judgement(Context(), Statement(T.typ.arg.typ.kind)))
-            )
-          d.VarRule(T.typ.arg.typ)
-        if T.Proper():
-          d.SortRule()
-        else:
-          d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.kind))))
-        p_t = d.conclusions[-1]
-        return d.AbstRule(T.typ.arg.typ, _Helper(TypeExpression(T.typ.body)), p_t)
-  _Helper(TypeExpression(jdgmnt.stmt.subj))
-  assert d.ctx == jdgmnt.ctx
-  return d
+# def DeriveType(jdgmnt: Judgement) -> Derivation:
+#   if not isinstance(jdgmnt.stmt.subj, TypeExpression):
+#     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+#   d = Derivation(Context())
+#   def _Helper(T: TypeExpression):
+#     match T.typ:
+#       case FreeTypeVar():
+#         pmiss = d.FindKind(T.kind)
+#         if pmiss is None:
+#           d.AppendRules(
+#               DeriveKind(
+#                   Judgement(d.conclusions[-1].ctx, Statement(T.typ.kind))
+#               )
+#           )
+#           pmiss = d.conclusions[-1]
+#         return d.VarRule(pmiss, T.Type())
+#       case BoundTypeVar():
+#         raise ValueError(f'Should not need rule for bound type {T.typ}')
+#       case TArrow():
+#         p_a = _Helper(T.typ.arg)
+#         p_b = _Helper(T.typ.ret)
+#         p_a, p_b = d.WeakenContexts(p_a, p_b)
+#         return d.FormRule(p_a, p_b)
+#       case TApply():
+#         return d.ApplRule(_Helper(T.typ.fn), _Helper(T.typ.arg))
+#       case TAbstract():
+#         if not d.ctx.ContainsTypeVar(T.typ.arg.typ):
+#           pmiss = d.FindKind(T.kind)
+#           if pmiss is None:
+#             d.AppendRules(
+#                 DeriveKind(
+#                     Judgement(
+#                         d.conclusions[-1].ctx, Statement(T.typ.arg.typ.kind)
+#                     )
+#                 )
+#             )
+#             pmiss = d.conclusions[-1]
+#           d.VarRule(pmiss, T.typ.arg.typ)
+#         if T.Proper():
+#           d.SortRule()
+#         else:
+#           d.AppendRules(DeriveKind(Judgement(Context(), Statement(T.kind))))
+#         p_t = d.conclusions[-1]
+#         return d.AbstRule(T.typ.arg.typ, _Helper(TypeExpression(T.typ.body)), p_t)
+#   _Helper(TypeExpression(jdgmnt.stmt.subj))
+#   return d
 
 
-def DeriveTerm(jdgmnt: Judgement) -> Derivation:
-  if not isinstance(jdgmnt.stmt.subj, Expression):
-    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
-  d = Derivation(Context())
-  def _Helper(M: Expression):
-    # Currently assumes β-normal form is in context.
-    # Does not support when the context has the unreduced form.
-    if not M.term.typ.BetaNormal():
-      t = BetaReduceType(TypeExpression(M.typ))
-      N = M.Copy()
-      N.SetType(t)
-      _Helper(N)
-      p1 = d.conclusions[-1]
-      ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-      d.AppendRules(
-          DeriveType(Judgement(Context(*ctx_types), Statement(M.term.typ)))
-      )
-      p2 = d.conclusions[-1]
-      return d.ConvRule(p1, p2)
-    match M.term:
-      case FreeVar():
-        if d.PremissForType(TypeExpression(M.typ)) is None:
-          ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-          d.AppendRules(
-              DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
-          )
-        return d.VarRule(M.term.var)
-      case BoundVar():
-        raise ValueError(f'Should not need rule for bound var {M.term}')
-      case Apply():
-        return d.ApplRule(_Helper(M.term.fn), _Helper(M.term.arg))
-      case Abstract():
-        p_body = _Helper(Expression(M.term.body))
-        if not d.ctx.ContainsVar(M.term.arg.var):
-          if d.PremissForType(TypeExpression(M.term.arg.typ)) is None:
-            ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-            d.AppendRules(
-                DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
-            )
-          d.VarRule(M.term.arg.var)
-        p_t = d.PremissForType(TypeExpression(M.Type()))
-        if p_t is None:
-          ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
-          d.AppendRules(
-              DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
-          )
-          p_t = d.conclusions[-1]
-        return d.AbstRule(M.term.arg.var, p_body, p_t)
-  _Helper(Expression(jdgmnt.stmt.subj))
-  assert d.ctx == jdgmnt.ctx
-  return d
+# def DeriveTerm(jdgmnt: Judgement) -> Derivation:
+#   if not isinstance(jdgmnt.stmt.subj, Expression):
+#     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+#   d = Derivation(Context())
+
+#   def _Helper(ctx: Context, M: Expression):
+#     # Currently assumes β-normal form is in context.
+#     # Does not support when the context has the unreduced form.
+#     if not M.term.typ.BetaNormal():
+#       t = BetaReduceType(TypeExpression(M.typ))
+#       N = M.Copy()
+#       N.SetType(t)
+#       _Helper(ctx, N)
+#       p1 = d.conclusions[-1]
+#       ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+#       d.AppendRules(
+#           DeriveType(Judgement(Context(*ctx_types), Statement(M.term.typ)))
+#       )
+#       p2 = d.conclusions[-1]
+#       return d.ConvRule(p1, p2)
+  
+#     match M.term:
+#       case FreeVar():
+#         if d.PremissForType(ctx, TypeExpression(M.typ)) is None:
+#           d.AppendRules(
+#               DeriveType(Judgement(ctx, Statement(M.typ)))
+#           )
+#           ctx = d.conclusions[-1].ctx
+#           assert d.PremissForType(ctx, TypeExpression(M.typ)) is not None, d.LinearFormat()
+#         return d.VarRule(d.PremissForType(ctx, TypeExpression(M.typ)), M.term.var)
+#       case BoundVar():
+#         raise ValueError(f'Should not need rule for bound var {M.term}')
+#       case Apply():
+#         p_m = _Helper(ctx, M.term.fn)
+#         p_n = _Helper(ctx, M.term.arg)
+#         p_m, p_n = d.WeakenContexts(p_m, p_n)
+#         return d.ApplRule(p_m, p_n)
+#       case Abstract():
+#         if d.PremissForType(ctx, TypeExpression(M.term.arg.typ)) is None:
+#           ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+#           d.AppendRules(
+#               DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
+#           )
+#         d.VarRule(M.term.arg.var)
+#         p_body = _Helper(ctx, Expression(M.term.body))
+#         p_t = d.PremissForType(ctx, TypeExpression(M.Type()))
+#         if p_t is None:
+#           ctx_types = [t.typ for t in FreeTypeVars(M.typ)]
+#           d.AppendRules(
+#               DeriveType(Judgement(Context(*ctx_types), Statement(M.typ)))
+#           )
+#           p_t = d.conclusions[-1]
+#         return d.AbstRule(M.term.arg.var, p_body, p_t)
+#   _Helper(jdgmnt.ctx, Expression(jdgmnt.stmt.subj))
+#   return d
