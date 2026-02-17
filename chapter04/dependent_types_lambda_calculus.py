@@ -1509,6 +1509,49 @@ class Derivation:
     assert p_bs in self.conclusions
     return self._AddRule(ConvRule(p_ab, p_bs))
 
+  def PremissForKind(self, kind: Kind) -> Optional[Judgement]:
+    for concl in self.conclusions:
+      if (
+          isinstance(concl.stmt.subj, Kind)
+          and concl.stmt.subj == kind
+      ):
+        return concl
+    return None
+
+  def WeakenContexts(
+      self, p_a: Judgement, p_b: Judgement
+  ) -> tuple[Judgement, Judgement]:
+    if p_a.ctx == p_b.ctx:
+      return p_a, p_b
+
+    for u in p_b.ctx.Dom():
+      if p_a.ctx.ContainsTypeVar(u):
+        continue
+      match u:
+        case TypeVar():
+          if p_a.ctx.ContainsTypeVar(u):
+            continue
+          p_k = self.PremissForKind(u.kind)
+          for v in p_a.ctx.Dom():
+            p_k = self.WeakRule(v, p_k, p_k)
+          p_a = self.WeakRule(u, p_a, p_k)
+        case Var():
+          pass
+
+    for u in p_a.ctx.Dom():
+      match u:
+        case TypeVar():
+          if p_b.ctx.ContainsTypeVar(u):
+            continue
+          p_k = self.PremissForKind(u.kind)
+          for v in p_b.ctx.Dom():
+            p_k = self.WeakRule(v, p_k, p_k)
+          p_b = self.WeakRule(u, p_b, p_k)
+        case Var():
+          pass
+
+    return p_a, p_b
+
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str],
       shorten = False,
@@ -1621,6 +1664,72 @@ class Derivation:
       result.append(line)
       result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
+
+
+def DeriveKind(jdgmnt: Judgement) -> Derivation:
+  if not isinstance(jdgmnt.stmt.subj, Kind):
+    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+  d = Derivation()
+  def _Helper(kind: Kind):
+    match kind:
+      case Star():
+        if isinstance(d.rules[-1], SortRule):
+          return d.conclusions[-1]
+        return d.SortRule()
+      case KArrow():
+        return d.FormRule(_Helper(kind.arg), _Helper(kind.ret))
+      case _:
+        raise NotImplementedError(f'Unexpected subject in judgement {jdgmnt}')
+  _Helper(jdgmnt.stmt.subj)
+  assert d.conclusions[-1].ctx == Context()
+  return d
+
+
+def DeriveType(jdgmnt: Judgement) -> Derivation:
+  if not isinstance(jdgmnt.stmt.subj, TypeExpression):
+    raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
+  d = Derivation()
+  def _Helper(ctx: Context, T: TypeExpression):
+    match T.typ:
+      case FreeTypeVar():
+        p = d.PremissForKind(T.kind)
+        if p is None:
+          dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
+          d.rules += dk.rules
+          d.conclusions += dk.conclusions
+          p = d.conclusions[-1]
+        return d.VarRule(p, T.Type())
+      case BoundTypeVar():
+        raise ValueError(f'Should not need rule for bound type {T.typ}')
+      case TArrow():
+        p_a = _Helper(ctx, T.typ.arg)
+        p_b = _Helper(ctx, T.typ.ret)
+        p_a, p_b = d.WeakenContexts(p_a, p_b)
+        return d.FormRule(p_a, p_b)
+      case TApply():
+        p_a = _Helper(ctx, T.typ.fn)
+        p_b = _Helper(ctx, T.typ.arg)
+        p_a, p_b = d.WeakenContexts(p_a, p_b)
+        return d.ApplRule(p_a, p_b)
+      case TAbstract():
+        p_k = d.PremissForKind(T.typ.arg.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
+          d.rules += dk.rules
+          d.conclusions += dk.conclusions
+          p_k = d.conclusions[-1]
+        d.VarRule(p_k, T.typ.arg.typ)
+        p_k = d.PremissForKind(T.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
+          d.rules += dk.rules
+          d.conclusions += dk.conclusions
+          p_k = d.conclusions[-1]
+        p_body = _Helper(ctx, TypeExpression(T.typ.body))
+        p_body, p_k = d.WeakenContexts(p_body, p_k)
+        return d.AbstRule(T.typ.arg.typ, p_body, p_k)
+  _Helper(jdgmnt.ctx, TypeExpression(jdgmnt.stmt.subj))
+  return d
 
 # class Derivation:
 #   def __init__(self, ctx: Context):
