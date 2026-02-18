@@ -711,7 +711,8 @@ class Var(Term):
   def __eq__(self, other):
     if isinstance(other, Occurrence):
       other = other.var
-    assert isinstance(other, Var)
+    if not isinstance(other, Var):
+      return False
     return self.name == other.name and self.typ == other.typ
 
 
@@ -1163,6 +1164,14 @@ class Judgement:
   def __str__(self):
     return f'{self.ctx} |- {self.stmt}'
 
+  def __eq__(self, other):
+    if not isinstance(other, Judgement):
+      return False
+    return (self.ctx, self.stmt.subj) == (other.ctx, other.stmt.subj)
+
+  def __hash__(self):
+    return id(self)
+
 
 class DerivationRule:
   ctx: Context
@@ -1597,6 +1606,37 @@ class Derivation:
   
     return p_a, p_b
 
+  def Merge(self, d: Derivation):
+    premiss_map: dict[str, Judgement] = {}
+    for new_rule, new_concl in zip(d.rules, d.conclusions):
+      found_concl = False
+      for concl in self.conclusions:
+        if concl == new_concl:
+          premiss_map[str(new_concl)] = concl
+          found_concl = True
+          break
+      if found_concl:
+        continue
+      new_premisses = [premiss_map[str(p)] for p in new_rule.premisses]
+      match new_rule:
+        case SortRule():
+          concl = self.SortRule()
+        case VarRule():
+          concl = self.VarRule(*new_premisses, new_rule.u)
+        case WeakRule():
+          concl = self.WeakRule(new_rule.u, *new_premisses)
+        case FormRule():
+          concl = self.FormRule(*new_premisses)
+        case ApplRule():
+          concl = self.ApplRule(*new_premisses)
+        case AbstRule():
+          concl = self.AbstRule(new_rule.arg, *new_premisses)
+        case ConvRule():
+          concl = self.ConvRule(*new_premisses)
+      premiss_map[str(concl)] = concl
+    return premiss_map[str(d.conclusions[-1])]
+
+
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str],
       shorten = False,
@@ -1650,7 +1690,6 @@ class Derivation:
     keys: dict[Judgement, str] = {}
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
-      skip_var_rule = False
       if shorten and (
           isinstance(rule, SortRule) or (
               isinstance(rule, FormRule) and isinstance(concl.stmt.subj, Kind)
@@ -1660,24 +1699,6 @@ class Derivation:
         justif = ''
       elif shorten and isinstance(rule, WeakRule):
         keys[concl] = keys[rule.premisses[0]]
-      elif shorten and isinstance(rule, VarRule):
-        concl_str = str(concl)
-        for concl_k in keys.keys():
-          match (concl.stmt.subj, concl_k.stmt.subj):
-            case (TypeExpression(), TypeExpression()):
-              if concl_k.stmt.subj.typ == concl.stmt.subj.typ:
-                keys[concl] = keys[concl_k]
-                skip_var_rule = True
-                break
-            case (Expression(), Expression()):
-              if concl_k.stmt.subj.term == concl.stmt.subj.term:
-                keys[concl] = keys[concl_k]
-                skip_var_rule = True
-                break
-        if not skip_var_rule:
-          key = chr(ord('a') + len(set(v for v in keys.values() if v)))
-          keys[concl] = key
-          justif = self._Justification(rule, keys, shorten)
       else:
         key = chr(ord('a') + len(set(v for v in keys.values() if v)))
         keys[concl] = key
@@ -1688,8 +1709,6 @@ class Derivation:
             continue
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case VarRule():
-          if shorten and skip_var_rule:
-            continue
           if isinstance(concl.stmt.subj, TypeExpression):
             decl = concl.stmt.subj.Type()
           else:
@@ -1761,9 +1780,7 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
         p = d.PremissForKind(ctx, T.kind)
         if p is None:
           dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
-          d.rules += dk.rules
-          d.conclusions += dk.conclusions
-          p = d.PremissForKind(ctx, T.kind)
+          p = d.Merge(dk)
         return d.VarRule(p, T.Type())
       case BoundTypeVar():
         raise ValueError(f'Should not need rule for bound type {T.typ}')
@@ -1781,16 +1798,12 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
         p_k = d.PremissForKind(ctx, T.typ.arg.kind)
         if p_k is None:
           dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
-          d.rules += dk.rules
-          d.conclusions += dk.conclusions
-          p_k = d.PremissForKind(ctx, T.kind)
+          p_k = d.Merge(dk)
         d.VarRule(p_k, T.typ.arg.typ)
         p_k = d.PremissForKind(ctx, T.kind)
         if p_k is None:
           dk = DeriveKind(Judgement(ctx, Statement(T.kind)))
-          d.rules += dk.rules
-          d.conclusions += dk.conclusions
-          p_k = d.PremissForKind(ctx, T.kind)
+          p_k = d.Merge(dk)
         p_body = _Helper(ctx, TypeExpression(T.typ.body))
         p_body, p_k = d.WeakenContexts(p_body, p_k)
         return d.AbstRule(T.typ.arg.typ, p_body, p_k)
@@ -1812,8 +1825,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       _Helper(ctx, N)
       p1 = d.conclusions[-1]
       dt = DeriveType(Judgement(Context(), Statement(M.term.typ)))
-      d.rules += dt.rules
-      d.conclusions += dt.conclusions
+      d.Merge(dt)
       p2 = d.conclusions[-1]
       p1, p2 = d.WeakenContexts(p1, p2)
       return d.ConvRule(p1, p2)
@@ -1823,9 +1835,7 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
         p_t = d.PremissForType(ctx, M.typ)
         if p_t is None:
           dt = DeriveType(Judgement(Context(), Statement(M.typ)))
-          d.rules += dt.rules
-          d.conclusions += dt.conclusions
-          p_t = d.conclusions[-1]
+          p_t = d.Merge(dt)
         return d.VarRule(p_t, M.term.var)
       case BoundVar():
         raise ValueError(f'Should not need rule for bound var {M.term}')
@@ -1838,20 +1848,17 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
         p_fn_t = d.PremissForType(ctx, TypeExpression(M.Type()))
         if p_fn_t is None:
           dt = DeriveType(Judgement(Context(), Statement(TypeExpression(M.Type()))))
-          d.rules += dt.rules
-          d.conclusions += dt.conclusions
+          p_fn_t = d.Merge(dt)
           p_fn_t = d.conclusions[-1]
-        p_body = _Helper(ctx.PushVar(M.term.arg.var), Expression(M.term.body))
         p_t = d.PremissForType(ctx, M.term.arg.var.typ)
         if p_t is None:
           dt = DeriveType(Judgement(Context(), Statement(M.term.arg.var.typ)))
-          d.rules += dt.rules
-          d.conclusions += dt.conclusions
-          p_t = d.conclusions[-1]
+          p_t = d.Merge(dt)
+        p_body = _Helper(p_t.ctx.PushVar(M.term.arg.var), Expression(M.term.body))
         p_arg = d.VarRule(p_t, M.term.arg.var)
         p_arg, p_body = d.WeakenContexts(p_arg, p_body)
         p_body, p_fn_t = d.WeakenContexts(p_body, p_fn_t)
         return d.AbstRule(M.term.arg.var, p_body, p_fn_t)
     pass
-  _Helper(jdgmnt.ctx, Expression(jdgmnt.stmt.subj))
+  _Helper(Context(), Expression(jdgmnt.stmt.subj))
   return d
