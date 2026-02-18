@@ -1477,9 +1477,8 @@ class Derivation:
 
   def VarRule(self, premiss: Judgement, u: Union[TypeVar, Var]) -> Judgement:
     for i, rule in enumerate(self.rules):
-      for i, rule in enumerate(self.rules):
-        if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
-          return self.conclusions[i]
+      if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
+        return self.conclusions[i]
     return self._AddRule(VarRule(premiss, u))
 
   def WeakRule(

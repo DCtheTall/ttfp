@@ -348,7 +348,7 @@ class TypeExpression(Type):
 
   def ReplaceKind(self, new_k: KindExpression) -> 'TypeExpression':
     assert isinstance(new_k, KindExpression)
-    if not (self.kind >> new_k):
+    if not (KindExpression(self.kind) >> KindExpression(new_k)):
       raise TypeError(f'New kind {new_k} must be β-equal to {self.kind}')
     T = self.Copy()
     T.kind = new_k
@@ -387,7 +387,8 @@ class Var(Term):
   def __eq__(self, other):
     if isinstance(other, Occurrence):
       other = other.var
-    assert isinstance(other, Var)
+    if not isinstance(other, Var):
+      return False
     return self.name == other.name and self.typ == other.typ
 
 
@@ -589,7 +590,7 @@ class Expression(Term):
   def Copy(self):
     match self.term:
       case FreeVar() | BoundVar():
-        return Expression(self.term.Copy())
+        return Expression(self.term.var)
       case Apply():
         return Expression(Apply(self.term.fn, self.term.arg))
       case Abstract():
@@ -603,7 +604,7 @@ class Expression(Term):
     match self.term:
       case FreeVar():
         if bv.ShouldBind(self.term):
-          self.term = BoundVar(self.term.var, self.term)
+          self.term = BoundVar(bv, self.term)
       case Apply():
         self.term.fn.MaybeBindFreeVarsTo(bv)
         self.term.arg.MaybeBindFreeVarsTo(bv)
@@ -617,7 +618,7 @@ class Expression(Term):
 
   def ReplaceType(self, new_t: TypeExpression) -> 'Expression':
     assert isinstance(new_t, TypeExpression)
-    if not (self.typ >> new_t):
+    if not (TypeExpression(self.typ) >> TypeExpression(new_t)):
       raise TypeError(f'New type {new_t} must be β-equal to {self.typ}')
     M = self.Copy()
     M.typ = new_t
@@ -1371,7 +1372,7 @@ class DerivationRule:
       ctx = premisses[0].ctx
       for pmiss in premisses:
         if ctx != pmiss.ctx:
-          if not isinstance(self, FormRule):
+          if not isinstance(self, FormRule) and not isinstance(self, AbstRule):
             raise ValueError(
                 'Cannot use different Contexts in premisses of '
                 f'the same DerivationRule: {ctx} != {pmiss.ctx}'
@@ -1422,7 +1423,7 @@ class VarRule(DerivationRule):
           raise ValueError(
               f'Cannot create VarRule for {u} with premiss {premiss}'
           )
-        if premiss.stmt.subj != TypeExpression(u.typ):
+        if TypeExpression(premiss.stmt.subj) != TypeExpression(u.typ):
           raise TypeError(
               f'Cannot create VarRule for {u} with mistmatched premiss {premiss}'
           )
@@ -1453,16 +1454,22 @@ class WeakRule(DerivationRule):
       case Var():
         if p_ab.ctx.ContainsVar(u) or p_cs.ctx.ContainsVar(u):
           raise ValueError(f'Cannot redeclare variable {u}')
-        if not isinstance(cs, TypeExpression) or cs.typ != u.Type():
+        if (
+            not isinstance(cs, TypeExpression)
+            or TypeExpression(cs.typ) != TypeExpression(u.Type())
+        ):
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u}'
           )
       case TypeVar():
         if p_ab.ctx.ContainsTypeVar(u) or p_cs.ctx.ContainsTypeVar(u):
           raise ValueError(f'Cannot redeclare type variable {u}')
-        if not isinstance(cs, Kind) or cs.kind != u.kind:
+        if (
+            not isinstance(cs, Kind)
+            or KindExpression(cs.kind) != KindExpression(u.kind)
+        ):
           raise TypeError(
-              f'Invalid second premiss for WeakRule {p_cs} given {u} '
+              f'Invalid second premiss for WeakRule {p_cs} given {u}'
           )
     self.ctx = p_ab.ctx
     self.u = u
@@ -1498,7 +1505,7 @@ class FormRule(DerivationRule):
     b = p_b.stmt.subj
     if not isinstance(a, TypeExpression):
       raise TypeError(f'Invalid first premiss to FormRule {p_a}')
-    if arg.typ != a:
+    if TypeExpression(arg.typ) != TypeExpression(a):
       raise TypeError(
           f'First FormRule premiss not match type of argument {arg}, {p_a}'
       )
@@ -1547,12 +1554,17 @@ class ApplRule(DerivationRule):
 
 
 class AbstRule(DerivationRule):
-  def __init__(self, u: Var, *premisses: Sequence[Judgement]):
+  def __init__(self, arg: Var, *premisses: Sequence[Judgement]):
     if len(premisses) != 2:
       raise ValueError('Can only create AbstRule with 2 Judgements')
     super().__init__(*premisses)
     p_xamb, p_abs = self.premisses
-    self.ctx = p_xamb.ctx.PullVar(u)
+    if p_abs.ctx != p_xamb.ctx.PullVar(arg):
+      raise ValueError(
+          'Cannot use different Contexts in premisses of '
+          f'the same DerivationRule: {p_abs.ctx} != {p_xamb.ctx.PullVar(arg)}'
+      )
+    self.ctx = p_xamb.ctx.PullVar(arg)
     xa_mb, ab_s =  p_xamb.stmt.subj, p_abs.stmt.subj
     match xa_mb:
       case TypeExpression():
@@ -1561,18 +1573,21 @@ class AbstRule(DerivationRule):
             or not isinstance(ab_s.kind, PiKind)
         ):
           raise TypeError(f'Invalid second premiss to AbstRule {p_abs}')
-        if ab_s.kind.arg.typ != u.typ or ab_s.kind.body != xa_mb.kind:
+        if ab_s.kind.arg.typ != arg.typ or ab_s.kind.body != xa_mb.kind:
           raise TypeError(f'Mismatched premisses to ApplRule {p_xamb} {p_abs}')
-        self.xam_xab = TypeExpression(TAbstract(u, xa_mb))
+        self.xam_xab = TypeExpression(TAbstract(arg, xa_mb))
       case Expression():
         if (
             not isinstance(ab_s, TypeExpression)
             or not isinstance(ab_s.typ, PiType)
         ):
           raise TypeError(f'Invalid second premiss to AbstRule {p_abs}')
-        if ab_s.typ.arg.typ != u.typ or ab_s.typ.body != xa_mb.typ:
+        if (
+            TypeExpression(ab_s.typ.arg.typ) != TypeExpression(arg.typ)
+            or TypeExpression(ab_s.typ.body) != TypeExpression(xa_mb.typ)
+        ):
           raise TypeError(f'Mismatched premisses to ApplRule {p_xamb} {p_abs}')
-        self.xam_xab = Expression(Abstract(u, xa_mb))
+        self.xam_xab = Expression(Abstract(arg, xa_mb))
       case _:
         raise NotImplementedError(
             f'Unexpected first premiss to AbstRule {p_xamb}'
@@ -1594,7 +1609,7 @@ class ConvRule(DerivationRule):
       case TypeExpression():
         if not isinstance(b_prime, KindExpression):
           raise TypeError(f'Invalid second premiss to ConvRule {p_bprime}')
-        if not (ab.kind >> b_prime):
+        if not (KindExpression(ab.kind) >> KindExpression(b_prime)):
           raise TypeError(
               f'Kind of first premiss {p_ab} must be β-equal to second '
               f'premiss {p_bprime}'
@@ -1619,47 +1634,105 @@ class ConvRule(DerivationRule):
 
 
 class Derivation:
-  def __init__(self, ctx: Context):
+  def __init__(self):
     # All derivations in this system start with (sort).
-    self.ctx = ctx
     self.rules: list[DerivationRule] = []
     self.conclusions: list[Judgement] = []
-    self.SortRule()
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
-    self.rules[-1].ctx = self.ctx
     concl = rule.Conclusion()
-    self.ctx = concl.ctx
     self.conclusions.append(concl)
     return concl
 
   def SortRule(self) -> Judgement:
-    self._AddRule(SortRule(self.ctx))
+    sort_rule = SortRule()
+    self.rules.append(sort_rule)
+    concl = sort_rule.Conclusion()
+    self.conclusions.append(concl)
+    return concl
 
   def SortRulePremiss(self) -> Judgement:
-    if isinstance(self.rules[-1], SortRule):
-      return self.conclusions[-1]
-    return self.SortRule()
+    if not self.conclusions:
+      self.SortRule()
+    return self.conclusions[0]
 
-  def VarRule(self, u: Union[TypeVar, Var]):
-    pass
+  def VarRule(self, premiss: Judgement, u: Union[TypeVar, Var]) -> Judgement:
+    for i, rule in enumerate(self.rules):
+      if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
+        return self.conclusions[i]
+    return self._AddRule(VarRule(premiss, u))
 
   def WeakRule(
       self, u: Union[TypeVar, Var], p_ab: Judgement, p_cs: Judgement
   ) -> Judgement:
-    pass
+    assert p_ab in self.conclusions
+    assert p_cs in self.conclusions
+    return self._AddRule(WeakRule(u, p_ab, p_cs))
 
-  def FormRule(self, p_a: Judgement, p_b: Judgement) -> Judgement:
-    pass
+  def FormRule(self, arg: Var, p_a: Judgement, p_b: Judgement) -> Judgement:
+    assert isinstance(arg, Var)
+    assert p_a in self.conclusions
+    assert p_b in self.conclusions
+    return self._AddRule(FormRule(arg, p_a, p_b))
 
   def ApplRule(self, p_mxab: Judgement, p_na: Judgement) -> Judgement:
-    pass
+    assert p_mxab in self.conclusions
+    assert p_na in self.conclusions
+    return self._AddRule(ApplRule(p_mxab, p_na))
 
   def AbstRule(
       self, arg: Union[TypeVar, Var], p_xamb: Judgement, p_abs: Judgement
   ) -> Judgement:
-    pass
+    assert p_xamb in self.conclusions
+    assert p_abs in self.conclusions
+    return self._AddRule(AbstRule(arg, p_xamb, p_abs))
 
   def ConvRule(self, p_ab: Judgement, p_bs: Judgement) -> Judgement:
-    pass
+    assert p_ab in self.conclusions
+    assert p_bs in self.conclusions
+    return self._AddRule(ConvRule(p_ab, p_bs))
+
+  def _Justification(
+      self, rule: DerivationRule, keys: dict[Judgement, str],
+  ) -> str:
+    match rule:
+      case SortRule():
+        return '(sort)'
+      case VarRule():
+        typ_key = keys[rule.premisses[0]]
+        return f'(var) on ({typ_key})'
+      case WeakRule():
+        ab_key = keys[rule.premisses[0]]
+        cs_key = keys[rule.premisses[1]]
+        return f'(weak) on ({ab_key}) and ({cs_key})'
+      case FormRule():
+        as_key = keys[rule.premisses[0]]
+        bs_key = keys[rule.premisses[1]]
+        return f'(form) on ({as_key}) and ({bs_key})'
+      case ApplRule():
+        mab_key = keys[rule.premisses[0]]
+        na_key = keys[rule.premisses[1]]
+        return f'(appl) on ({mab_key}) and ({na_key})'
+      case AbstRule():
+        xamb_key = keys[rule.premisses[0]]
+        abs_key = keys[rule.premisses[1]]
+        return f'(abst) on ({xamb_key}) and ({abs_key})'
+      case ConvRule():
+        ab_key = keys[rule.premisses[0]]
+        bs_key = keys[rule.premisses[1]]
+        return f'(conv) on ({ab_key}) and ({bs_key})'
+      case _:
+        raise ValueError(f'Unexpected input to Justification {rule}')
+
+  def LinearFormat(self) -> str:
+    result = []
+    keys: dict[Judgement, str] = {}
+    for rule, concl in zip(self.rules, self.conclusions):
+      key = chr(ord('a') + len(keys))
+      keys[concl] = key
+      justif = self._Justification(rule, keys)
+      line = f'({key}) {concl}    {justif}'
+      result.append(line)
+      result.append('-' * len(line))
+    return '\n'.join(result)

@@ -69,13 +69,13 @@ def RunExamples():
   print(appl)
   print('Abst rule for type:')
   p_kind = Judgement(
-      Context(alpha, x, F), Statement(KindExpression(PiKind(x, Star())))
+      Context(alpha, F), Statement(KindExpression(PiKind(x, Star())))
   )
   abst_t = AbstRule(x, appl_t.Conclusion(), p_kind)
   print(abst_t)
   print('Abst rule for term:')
   p_typ = Judgement(
-      Context(alpha, x, f), Statement(TypeExpression(PiType(x, alpha)))
+      Context(alpha, f), Statement(TypeExpression(PiType(x, alpha)))
   )
   abst = AbstRule(x, appl.Conclusion(), p_typ)
   print(abst)
@@ -97,6 +97,34 @@ def RunExamples():
   p_a = Judgement(Context(S, P, u, z), Statement(Expression(z)))
   p_b = Judgement(Context(S, P, u, z), Statement(TypeExpression(TApply(P, u))))
   print(ConvRule(p_a, p_b))
+
+
+  print('\nExamples from 5.3')
+  A = TypeVar('A', Star())
+  x = Var('x', A)
+  P = TypeVar('P', PiKind(x, Star()))
+  y = Var('y', TypeExpression(TApply(P, x)))
+  d = Derivation()
+  one = d.SortRule()
+  two = d.VarRule(A, one)
+  three = d.WeakRule(A, one, one)
+  four = d.WeakRule(x, three, two)
+  five = d.FormRule(x, two, four)
+  six = d.VarRule(P, five)
+  seven = d.WeakRule(P, two, five)
+  eight = d.WeakRule(P, three, five)
+  nine = d.VarRule(x, seven)
+  ten = d.WeakRule(x, six, seven)
+  eleven = d.ApplRule(ten, nine)
+  twelve = d.FormRule(x, seven, eleven)
+  thirteen = d.WeakRule(y, eleven, eleven)
+  fourteen = d.FormRule(y, eleven, thirteen)
+  fifteen = d.FormRule(x, seven, fourteen)
+  sixteen = d.VarRule(y, eleven)
+  seventeen = d.AbstRule(y, sixteen, fourteen)
+  eighteen = d.AbstRule(x, seventeen, fifteen)
+  print(d.LinearFormat())
+  # TODO flag format
 
 
 if __name__ == '__main__':
