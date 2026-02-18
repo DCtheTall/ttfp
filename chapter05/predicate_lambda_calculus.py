@@ -1329,12 +1329,6 @@ class Context:
         self.ContainsVar(u) for u in FreeVars(rho)
     )
 
-  def OverlappingUnion(self, other: 'Context') -> 'Context':
-    assert self < other or other < self
-    if self < other:
-      return other
-    return self
-
 
 class Statement:
   subj: Union[KindExpression, TypeExpression, Expression]
@@ -1376,11 +1370,12 @@ class DerivationRule:
     if premisses:
       ctx = premisses[0].ctx
       for pmiss in premisses:
-        if not (ctx < pmiss.ctx) and not (pmiss.ctx < ctx):
-          raise ValueError(
-              'Cannot use different Contexts in premisses of '
-              f'the same DerivationRule: {ctx} != {pmiss.ctx}'
-          )
+        if ctx != pmiss.ctx:
+          if not isinstance(self, FormRule):
+            raise ValueError(
+                'Cannot use different Contexts in premisses of '
+                f'the same DerivationRule: {ctx} != {pmiss.ctx}'
+            )
     self.premisses = list(premisses)
   
   def Conclusion(self) -> Judgement:
@@ -1397,12 +1392,11 @@ class DerivationRule:
 
 
 class SortRule(DerivationRule):
-  def __init__(self, ctx: Context):
+  def __init__(self):
     super().__init__()
-    self.ctx = ctx
 
   def Conclusion(self) -> Judgement:
-    return Judgement(self.ctx, Statement(KindExpression(Star())))
+    return Judgement(Context(), Statement(KindExpression(Star())))
 
 
 class VarRule(DerivationRule):
@@ -1470,7 +1464,7 @@ class WeakRule(DerivationRule):
           raise TypeError(
               f'Invalid second premiss for WeakRule {p_cs} given {u} '
           )
-    self.ctx = p_ab.ctx.OverlappingUnion(p_cs.ctx)
+    self.ctx = p_ab.ctx
     self.u = u
 
   def Conclusion(self) -> Judgement:
@@ -1494,7 +1488,12 @@ class FormRule(DerivationRule):
       raise ValueError('Can only create FormRule with 2 Judgements')
     super().__init__(*premisses)
     p_a, p_b = self.premisses
-    self.ctx = p_a.ctx.OverlappingUnion(p_b.ctx.PullVar(arg))
+    if p_a.ctx != p_b.ctx.PullVar(arg):
+      raise ValueError(
+          'Cannot use different Contexts in premisses of '
+          f'the same DerivationRule: {p_a.ctx} != {p_b.ctx.PullVar(arg)}'
+      )
+    self.ctx = p_a.ctx
     a = p_a.stmt.subj
     b = p_b.stmt.subj
     if not isinstance(a, TypeExpression):
@@ -1521,7 +1520,7 @@ class ApplRule(DerivationRule):
       raise ValueError('Can only create ApplRule with 2 Judgements')
     super().__init__(*premisses)
     p_mxab, p_na = self.premisses
-    self.ctx = p_mxab.ctx.OverlappingUnion(p_na.ctx)
+    self.ctx = p_mxab.ctx
     mxab, na = p_mxab.stmt.subj, p_na.stmt.subj
     if not isinstance(na, Expression):
       raise TypeError(f'Invalid second premiss to ApplRule {p_na}')
@@ -1553,7 +1552,7 @@ class AbstRule(DerivationRule):
       raise ValueError('Can only create AbstRule with 2 Judgements')
     super().__init__(*premisses)
     p_xamb, p_abs = self.premisses
-    self.ctx = p_xamb.ctx.OverlappingUnion(p_abs.ctx).PullVar(u)
+    self.ctx = p_xamb.ctx.PullVar(u)
     xa_mb, ab_s =  p_xamb.stmt.subj, p_abs.stmt.subj
     match xa_mb:
       case TypeExpression():
@@ -1589,7 +1588,7 @@ class ConvRule(DerivationRule):
       raise ValueError('Can only create ConvRule with 2 Judgements')
     super().__init__(*premisses)
     p_ab, p_bprime = self.premisses
-    self.ctx = p_ab.ctx.OverlappingUnion(p_bprime.ctx)
+    self.ctx = p_ab.ctx
     ab, b_prime = p_ab.stmt.subj, p_bprime.stmt.subj
     match ab:
       case TypeExpression():

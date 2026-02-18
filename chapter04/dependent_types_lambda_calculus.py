@@ -40,7 +40,8 @@ class KArrow(Kind):
     return f'({str(self.arg)[:-2]} -> {str(ret_str)[:-2]}):{AllKinds()}'
 
   def __eq__(self, other):
-    assert isinstance(other, Kind)
+    if not isinstance(other, Kind):
+      return False
     if not isinstance(other, KArrow):
       return False
     return (self.arg, self.ret) == (other.arg, other.ret)
@@ -1455,7 +1456,6 @@ class Derivation:
   def __init__(self):
     self.rules: list[DerivationRule] = []
     self.conclusions: list[Judgement] = []
-    self.SortRule()
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
     self.rules.append(rule)
@@ -1471,6 +1471,8 @@ class Derivation:
     return concl
 
   def SortRulePremiss(self) -> Judgement:
+    if not self.conclusions:
+      self.SortRule()
     return self.conclusions[0]
 
   def VarRule(self, premiss: Judgement, u: Union[TypeVar, Var]) -> Judgement:
@@ -1541,14 +1543,14 @@ class Derivation:
     for t in ctx.Dom().types:
       if premiss.ctx.ContainsTypeVar(t):
         continue
-      cur_p = self._ApplyCorrectWeakening(t, cur_p)
+      cur_p = self._ApplyWeakening(t, cur_p)
     for u in ctx.Dom().vars:
       if premiss.ctx.ContainsVar(u):
         continue
-      cur_p =  self._ApplyCorrectWeakening(u, cur_p)
+      cur_p =  self._ApplyWeakening(u, cur_p)
     return cur_p
 
-  def _ApplyCorrectWeakening(
+  def _ApplyWeakening(
       self, u: Union[TypeVar, Var], premiss: Judgement
   ) -> Judgement:
     if isinstance(u, TypeVar):
@@ -1649,6 +1651,7 @@ class Derivation:
     keys: dict[Judgement, str] = {}
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
+      skip_var_rule = False
       if shorten and (
           isinstance(rule, SortRule) or (
               isinstance(rule, FormRule) and isinstance(concl.stmt.subj, Kind)
@@ -1658,6 +1661,24 @@ class Derivation:
         justif = ''
       elif shorten and isinstance(rule, WeakRule):
         keys[concl] = keys[rule.premisses[0]]
+      elif shorten and isinstance(rule, VarRule):
+        concl_str = str(concl)
+        for concl_k in keys.keys():
+          match (concl.stmt.subj, concl_k.stmt.subj):
+            case (TypeExpression(), TypeExpression()):
+              if concl_k.stmt.subj.typ == concl.stmt.subj.typ:
+                keys[concl] = keys[concl_k]
+                skip_var_rule = True
+                break
+            case (Expression(), Expression()):
+              if concl_k.stmt.subj.term == concl.stmt.subj.term:
+                keys[concl] = keys[concl_k]
+                skip_var_rule = True
+                break
+        if not skip_var_rule:
+          key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+          keys[concl] = key
+          justif = self._Justification(rule, keys, shorten)
       else:
         key = chr(ord('a') + len(set(v for v in keys.values() if v)))
         keys[concl] = key
@@ -1668,6 +1689,8 @@ class Derivation:
             continue
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case VarRule():
+          if shorten and skip_var_rule:
+            continue
           if isinstance(concl.stmt.subj, TypeExpression):
             decl = concl.stmt.subj.Type()
           else:
@@ -1717,7 +1740,7 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
   def _Helper(kind: Kind):
     match kind:
       case Star():
-        if isinstance(d.rules[-1], SortRule):
+        if d.rules and isinstance(d.rules[-1], SortRule):
           return d.conclusions[-1]
         return d.SortRule()
       case KArrow():
