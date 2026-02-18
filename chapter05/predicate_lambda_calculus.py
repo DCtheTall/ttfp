@@ -40,7 +40,7 @@ class PiKind(Kind):
   def __eq__(self, other):
     if isinstance(other, KindExpression):
       other = other.kind
-    if not isinstance(other, PiType):
+    if not isinstance(other, PiKind):
       return False
     return (self.arg, self.body) == (other.arg, other.body)
 
