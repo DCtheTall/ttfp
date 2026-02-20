@@ -124,6 +124,8 @@ def RunExamples():
   seventeen = d.AbstRule(y, sixteen, fourteen)
   eighteen = d.AbstRule(x, seventeen, fifteen)
   print(d.FlagFormat())
+  print('Shortened version:')
+  print(d.FlagFormat(shorten=True))
 
 
 if __name__ == '__main__':

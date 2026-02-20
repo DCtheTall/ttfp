@@ -61,6 +61,9 @@ class PiKind(Kind):
     args = str(self.arg)
     if isinstance(body, PiKind):
       while isinstance(body, PiKind):
+        body_str = str(body)
+        if body_str[0] == '(':  # Arrow
+          break
         args = f'{args},{body.arg}'
         body = body.BodyKind()
     body = str(body)
@@ -189,6 +192,9 @@ class PiType(Type):
     args = str(self.arg)
     if isinstance(body, PiType):
       while isinstance(body, PiType):
+        body_str = str(body)
+        if body_str[0] == '(':  # Arrow
+          break
         args = f'{args},{body.arg}'
         body = body.BodyType()
     body_kind = str(body.kind)[:-2]
@@ -1739,6 +1745,7 @@ class Derivation:
       result.append('-' * len(line))
     return '\n'.join(result)
 
+  # TODO shorten
   def FlagFormat(self, shorten = False) -> str:
     result = []
     indent_count = 0
@@ -1759,6 +1766,8 @@ class Derivation:
         key = chr(ord('a') + len(set(v for v in keys.values() if v)))
         keys[concl] = key
         justif = self._Justification(rule, keys, shorten)
+      if shorten and any(isinstance(rule, R) for R in [SortRule, WeakRule, FormRule]):
+        continue
       for decl in concl.ctx.Dom():
         if decl in flags:
           continue
@@ -1768,15 +1777,19 @@ class Derivation:
             + '|'
             + '-' * (len(str(decl)) + 3)
         )
-        line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
+        if shorten and isinstance(rule, VarRule):
+          line = f'({key}) {indent}| {decl} |'
+        else:
+          line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
         result.extend([seperator, line, seperator])
         indent_count += 1
         indent = '| ' * indent_count
         flags.append(decl)
       match rule:
+        case VarRule():
+          if not shorten:
+            line = f'({key}) {indent}{concl.stmt}    {justif}'
         case SortRule():
-          if shorten:
-            continue
           line = f'({key}) {indent}{concl.stmt}    {justif}'
         case FormRule():
           indent_count -= 1
@@ -1790,6 +1803,7 @@ class Derivation:
           assert rule.arg == flags.pop()
         case DerivationRule():
           line = f'({key}) {indent}{concl.stmt}    {justif}'
-      result.append(line)
-      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+      if not shorten or not isinstance(rule, VarRule):
+        result.append(line)
+        result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
