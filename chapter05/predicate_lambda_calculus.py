@@ -1495,12 +1495,13 @@ class FormRule(DerivationRule):
       raise ValueError('Can only create FormRule with 2 Judgements')
     super().__init__(*premisses)
     p_a, p_b = self.premisses
-    if p_a.ctx != p_b.ctx.PullVar(arg):
+    self.ctx = p_b.ctx.PullVar(arg)
+    if p_a.ctx != self.ctx:
       raise ValueError(
           'Cannot use different Contexts in premisses of '
           f'the same DerivationRule: {p_a.ctx} != {p_b.ctx.PullVar(arg)}'
       )
-    self.ctx = p_a.ctx
+    self.arg = arg
     a = p_a.stmt.subj
     b = p_b.stmt.subj
     if not isinstance(a, TypeExpression):
@@ -1565,6 +1566,7 @@ class AbstRule(DerivationRule):
           f'the same DerivationRule: {p_abs.ctx} != {p_xamb.ctx.PullVar(arg)}'
       )
     self.ctx = p_xamb.ctx.PullVar(arg)
+    self.arg = arg
     xa_mb, ab_s =  p_xamb.stmt.subj, p_abs.stmt.subj
     match xa_mb:
       case TypeExpression():
@@ -1658,9 +1660,6 @@ class Derivation:
     return self.conclusions[0]
 
   def VarRule(self, premiss: Judgement, u: Union[TypeVar, Var]) -> Judgement:
-    for i, rule in enumerate(self.rules):
-      if isinstance(rule, VarRule) and rule.u == u and rule.ctx == premiss.ctx:
-        return self.conclusions[i]
     return self._AddRule(VarRule(premiss, u))
 
   def WeakRule(
@@ -1695,6 +1694,7 @@ class Derivation:
 
   def _Justification(
       self, rule: DerivationRule, keys: dict[Judgement, str],
+      shorten = False,
   ) -> str:
     match rule:
       case SortRule():
@@ -1716,6 +1716,8 @@ class Derivation:
         return f'(appl) on ({mab_key}) and ({na_key})'
       case AbstRule():
         xamb_key = keys[rule.premisses[0]]
+        if shorten:
+          return f'(abst) on ({xamb_key})'
         abs_key = keys[rule.premisses[1]]
         return f'(abst) on ({xamb_key}) and ({abs_key})'
       case ConvRule():
@@ -1735,4 +1737,59 @@ class Derivation:
       line = f'({key}) {concl}    {justif}'
       result.append(line)
       result.append('-' * len(line))
+    return '\n'.join(result)
+
+  def FlagFormat(self, shorten = False) -> str:
+    result = []
+    indent_count = 0
+    keys: dict[Judgement, str] = {}
+    flags = []
+    for rule, concl in zip(self.rules, self.conclusions):
+      indent = '| ' * indent_count
+      if shorten and (
+          isinstance(rule, SortRule) or (
+              isinstance(rule, FormRule) and isinstance(concl.stmt.subj, Kind)
+          )
+      ):
+        keys[concl] = ''
+        justif = ''
+      elif shorten and isinstance(rule, WeakRule):
+        keys[concl] = keys[rule.premisses[0]]
+      else:
+        key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+        keys[concl] = key
+        justif = self._Justification(rule, keys, shorten)
+      for decl in concl.ctx.Dom():
+        if decl in flags:
+          continue
+        seperator = (
+            ' ' * len(f'({key}) ')
+            + '| ' * indent_count
+            + '|'
+            + '-' * (len(str(decl)) + 3)
+        )
+        line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
+        result.extend([seperator, line, seperator])
+        indent_count += 1
+        indent = '| ' * indent_count
+        flags.append(decl)
+      match rule:
+        case SortRule():
+          if shorten:
+            continue
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+        case FormRule():
+          indent_count -= 1
+          indent = '| ' * indent_count
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+          assert rule.arg == flags.pop()
+        case AbstRule():
+          indent_count -= 1
+          indent = '| ' * indent_count
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+          assert rule.arg == flags.pop()
+        case DerivationRule():
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+      result.append(line)
+      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)

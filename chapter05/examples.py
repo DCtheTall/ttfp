@@ -123,8 +123,7 @@ def RunExamples():
   sixteen = d.VarRule(y, eleven)
   seventeen = d.AbstRule(y, sixteen, fourteen)
   eighteen = d.AbstRule(x, seventeen, fifteen)
-  print(d.LinearFormat())
-  # TODO flag format
+  print(d.FlagFormat())
 
 
 if __name__ == '__main__':
