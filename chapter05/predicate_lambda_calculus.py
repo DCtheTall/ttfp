@@ -45,12 +45,9 @@ class PiKind(Kind):
     return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
-    if (
-        isinstance(self.body, KindExpression)
-        and not FreeVars(self.body.Copy()).Contains(self.arg.var)
-    ):
+    if self._IsArrow():
       body_str = str(self.body)
-      if isinstance(self.body.kind, PiKind) and body_str[0] == '(':
+      if isinstance(self.body.kind, PiKind) and self.body.kind._IsArrow():
         body_str = body_str[1:-1]
       arg_str = str(self.arg.typ)
       arg_kind = str(self.arg.typ.kind)[:-2]
@@ -61,8 +58,7 @@ class PiKind(Kind):
     args = str(self.arg)
     if isinstance(body, PiKind):
       while isinstance(body, PiKind):
-        body_str = str(body)
-        if body_str[0] == '(':  # Arrow
+        if body._IsArrow():  # Arrow
           break
         args = f'{args},{body.arg}'
         body = body.BodyKind()
@@ -73,6 +69,12 @@ class PiKind(Kind):
     if isinstance(self.body, KindExpression):
       return self.body.kind
     return self.body
+
+  def _IsArrow(self):
+    return (
+        isinstance(self.body, KindExpression)
+        and not FreeVars(self.body.Copy()).Contains(self.arg.var)
+    )
 
 
 class KindExpression(Kind):
@@ -176,12 +178,9 @@ class PiType(Type):
     return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
-    if (
-        isinstance(self.body, TypeExpression)
-        and not FreeVars(self.body.Copy()).Contains(self.arg.var)
-    ):
+    if self._IsArrow():
       body_str = str(self.body)
-      if isinstance(self.body.Kind(), PiKind) and body_str[0] == '(':
+      if isinstance(self.BodyType(), PiType) and self.BodyType()._IsArrow():
         body_str = body_str[1:-1]
       arg_str = str(self.arg.typ)
       arg_kind = str(self.arg.typ.kind)[:-2]
@@ -192,8 +191,7 @@ class PiType(Type):
     args = str(self.arg)
     if isinstance(body, PiType):
       while isinstance(body, PiType):
-        body_str = str(body)
-        if body_str[0] == '(':  # Arrow
+        if body._IsArrow():  # Arrow
           break
         args = f'{args},{body.arg}'
         body = body.BodyType()
@@ -208,6 +206,12 @@ class PiType(Type):
     if isinstance(self.body, TypeExpression):
       return self.body.typ
     return self.body
+
+  def _IsArrow(self):
+    return (
+        isinstance(self.body, TypeExpression)
+        and not FreeVars(self.body.Copy()).Contains(self.arg.var)
+    )
 
 
 class TAbstract(Type):
@@ -1745,7 +1749,10 @@ class Derivation:
       result.append('-' * len(line))
     return '\n'.join(result)
 
-  # TODO shorten
+  def ShortenedFlagFormat(self):
+    for rule, concl in zip(self.rules, self.conclusions):
+      pass
+
   def FlagFormat(self, shorten = False) -> str:
     result = []
     indent_count = 0
