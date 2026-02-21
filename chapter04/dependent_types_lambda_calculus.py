@@ -1849,7 +1849,6 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
         if p_fn_t is None:
           dt = DeriveType(Judgement(Context(), Statement(TypeExpression(M.Type()))))
           p_fn_t = d.Merge(dt)
-          p_fn_t = d.conclusions[-1]
         p_t = d.PremissForType(ctx, M.term.arg.var.typ)
         if p_t is None:
           dt = DeriveType(Judgement(Context(), Statement(M.term.arg.var.typ)))
