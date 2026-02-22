@@ -125,8 +125,7 @@ def RunExamples():
   p19 = d.AbstRule(x, p18, p15)
   print(d.FlagFormat())
   print('Shortened version:')
-  print('TODO')
-  # print(d.FlagFormat(shorten=True))
+  print(d.ShortenedFlagFormat())
 
 
   print('\nExamples from 5.4')
@@ -162,16 +161,19 @@ def RunExamples():
 
 
   print('\nExample from 5.4')
+  print('Prove ∀x,y ∈ S: Q(x, y) => ∀u ∈ S: Q(u, u)')
+  print('Find inhabitant of type ((Πx:S,y:S.(Q x y)) -> (Πu:S.(Q u u)))')
   S = TypeVar('S', Star())
   x = Var('x', S)
   y = Var('y', S)
   Q = TypeVar('Q', PiKind(x, PiKind(y, Star())))
   u = Var('u', S)
-  z = Var('z', TypeExpression(PiType(x, PiType(y, TApply(TApply(Q, x), y)))))
+  z_t = TypeExpression(PiType(x, PiType(y, TApply(TApply(Q, x), y))))
+  z = Var('z', z_t)
   inhab = Expression(Apply(Apply(z, u), u))
-  # inhab = Expression(Abstract(z, Abstract(u, Apply(Apply(z, u), u))))
-  d = DeriveTerm(Judgement(Context(), Statement(Expression(z))))
-  print(d.FlagFormat())
+  inhab = Expression(Abstract(z, Abstract(u, Apply(Apply(z, u), u))))
+  d = DeriveTerm(Judgement(Context(), Statement(inhab)))
+  print(d.ShortenedFlagFormat())
 
 
 if __name__ == '__main__':

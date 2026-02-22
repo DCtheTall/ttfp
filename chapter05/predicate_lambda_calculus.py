@@ -1960,8 +1960,67 @@ class Derivation:
     return '\n'.join(result)
 
   def ShortenedFlagFormat(self) -> str:
-    # TODO
-    pass
+    flag_vars = []
+    for rule in self.rules:
+      match rule:
+        case VarRule():
+          flag_vars.append(rule.u)
+        case AbstRule():
+          arg = flag_vars.pop()
+          assert rule.arg == arg
+    ctx = self.conclusions[-1].ctx
+    weak_vars = [u for u in flag_vars if u not in ctx.Dom()]
+    result = []
+    indent_count = 0
+    keys: dict[Judgement, str] = {}
+    for rule, concl in zip(self.rules, self.conclusions):
+      indent = '| ' * indent_count
+      if (
+          any(isinstance(rule, R) for R in [FormRule, SortRule])
+          or (
+              isinstance(rule, ApplRule)
+              and isinstance(concl.stmt.subj, TypeExpression)
+          )
+          or (isinstance(rule, VarRule) and rule.u in weak_vars)
+      ):
+        keys[concl] = ''
+        justif = ''
+      elif isinstance(rule, WeakRule):
+        premise_concl = rule.premisses[0]
+        keys[concl] = keys.get(premise_concl, '')
+      else:
+        key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+        keys[concl] = key
+        justif = self._Justification(rule, keys, shorten=True)
+      match rule:
+        case FormRule() | SortRule() | WeakRule():
+          continue
+        case VarRule():
+          if rule.u in weak_vars:
+            continue
+          seperator = (
+              ' ' * len(f'({key}) ')
+              + '| ' * indent_count
+              + '|'
+              + '-' * (len(str(rule.u)) + 3)
+          )
+          line = f'({key}) {indent}| {rule.u} |'
+          result.extend([seperator, line, seperator])
+          indent_count += 1
+          continue
+        case AbstRule():
+          indent_count -= 1
+          indent = '| ' * indent_count
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+        case ApplRule():
+          if isinstance(concl.stmt.subj, TypeExpression):
+            continue
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+        case DerivationRule():
+          line = f'({key}) {indent}{concl.stmt}    {justif}'
+      result.append(line)
+      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+    return '\n'.join(result)
 
 
 def DeriveKind(jdgmnt: Judgement) -> Derivation:
