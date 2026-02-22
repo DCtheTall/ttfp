@@ -125,7 +125,8 @@ def RunExamples():
   p19 = d.AbstRule(x, p18, p15)
   print(d.FlagFormat())
   print('Shortened version:')
-  print(d.FlagFormat(shorten=True))
+  print('TODO')
+  # print(d.FlagFormat(shorten=True))
 
 
   print('\nExamples from 5.4')
@@ -167,10 +168,10 @@ def RunExamples():
   Q = TypeVar('Q', PiKind(x, PiKind(y, Star())))
   u = Var('u', S)
   z = Var('z', TypeExpression(PiType(x, PiType(y, TApply(TApply(Q, x), y)))))
-  inhab = Expression(Abstract(z, Abstract(u, Apply(Apply(z, u), u))))
-  d = DeriveTerm(Judgement(Context(), Statement(Expression(inhab))))
-  # TODO fix printing bugs.
-  print(d.FlagFormat(shorten=True))
+  inhab = Expression(Apply(Apply(z, u), u))
+  # inhab = Expression(Abstract(z, Abstract(u, Apply(Apply(z, u), u))))
+  d = DeriveTerm(Judgement(Context(), Statement(Expression(z))))
+  print(d.FlagFormat())
 
 
 if __name__ == '__main__':

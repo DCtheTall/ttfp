@@ -1918,31 +1918,16 @@ class Derivation:
       result.append('-' * len(line))
     return '\n'.join(result)
 
-  def ShortenedFlagFormat(self):
-    pass
-
-  def FlagFormat(self, shorten = False) -> str:
+  def FlagFormat(self) -> str:
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
     flags = []
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
-      if shorten and (
-          isinstance(rule, SortRule) or (
-              isinstance(rule, FormRule) and isinstance(concl.stmt.subj, Kind)
-          )
-      ):
-        keys[concl] = ''
-        justif = ''
-      elif shorten and isinstance(rule, WeakRule):
-        keys[concl] = keys[rule.premisses[0]]
-      else:
-        key = chr(ord('a') + len(set(v for v in keys.values() if v)))
-        keys[concl] = key
-        justif = self._Justification(rule, keys, shorten)
-      if shorten and any(isinstance(rule, R) for R in [SortRule, WeakRule, FormRule]):
-        continue
+      key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+      keys[concl] = key
+      justif = self._Justification(rule, keys)
       for decl in concl.ctx.Dom():
         if decl in flags:
           continue
@@ -1952,20 +1937,12 @@ class Derivation:
             + '|'
             + '-' * (len(str(decl)) + 3)
         )
-        if shorten and isinstance(rule, VarRule):
-          line = f'({key}) {indent}| {decl} |'
-        else:
-          line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
+        line = f'{' ' * (len(key) + 2)} {indent}| {decl} |'
         result.extend([seperator, line, seperator])
         indent_count += 1
         indent = '| ' * indent_count
         flags.append(decl)
       match rule:
-        case VarRule():
-          if not shorten:
-            line = f'({key}) {indent}{concl.stmt}    {justif}'
-        case SortRule():
-          line = f'({key}) {indent}{concl.stmt}    {justif}'
         case FormRule():
           indent_count -= 1
           indent = '| ' * indent_count
@@ -1975,13 +1952,16 @@ class Derivation:
           indent_count -= 1
           indent = '| ' * indent_count
           line = f'({key}) {indent}{concl.stmt}    {justif}'
-          assert rule.arg == flags.pop()
+          assert rule.arg == flags.pop(), concl
         case DerivationRule():
           line = f'({key}) {indent}{concl.stmt}    {justif}'
-      if not shorten or not isinstance(rule, VarRule):
-        result.append(line)
-        result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
+      result.append(line)
+      result.append(f'    {indent[:-1]}' + '-' * (len(line) - len(indent) - 3))
     return '\n'.join(result)
+
+  def ShortenedFlagFormat(self) -> str:
+    # TODO
+    pass
 
 
 def DeriveKind(jdgmnt: Judgement) -> Derivation:
@@ -2000,9 +1980,10 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
         p_a = d.PremissForType(ctx, K.kind.arg.typ)
         if p_a is None:
           dt = DeriveType(
-              Judgement(ctx, Statement(TypeExpression(K.kind.arg.typ)))
+              Judgement(Context(), Statement(TypeExpression(K.kind.arg.typ)))
           )
           p_a = d.Merge(dt)
+          p_a = d.WeakenToContext(p_a, ctx)
         p_arg = d.VarRule(K.kind.arg.var, p_a)
         p_body = d.PremissForKind(p_arg.ctx, K.kind.body)
         if p_body is None:
@@ -2011,6 +1992,7 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
           )
           p_body = d.Merge(dk)
           p_body = d.WeakenToContext(p_body, p_arg.ctx)
+          p_a = d.WeakenToContext(p_a, p_body.ctx.PullVar(K.kind.arg.var))
         return d.FormRule(K.kind.arg.var, p_a, p_body)
   _Helper(jdgmnt.ctx, jdgmnt.stmt.subj)
   return d
@@ -2033,9 +2015,10 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
         p_a = d.PremissForType(ctx, T.typ.arg.typ)
         if p_a is None:
           dt = DeriveType(
-              Judgement(ctx, Statement(TypeExpression(T.typ.arg.typ)))
+              Judgement(Context(), Statement(TypeExpression(T.typ.arg.typ)))
           )
           p_a = d.Merge(dt)
+          p_a = d.WeakenToContext(p_a, ctx)
         p_arg = d.VarRule(T.typ.arg.var, p_a)
         p_body = d.PremissForType(p_arg.ctx, T.typ.body)
         if p_body is None:
@@ -2067,11 +2050,11 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
           dt = DeriveType(Judgement(ctx, Statement(T.typ.arg.var.typ)))
           p_t = d.Merge(dt)
         p_fn_k, p_t = d.WeakenContexts(p_fn_k, p_t)
-        p_arg = d.VarRule(T.typ.arg.var, p_t)
-        p_body = d.PremissForType(p_arg.ctx, TypeExpression(T.typ.body))
+        p_body = d.PremissForType(p_a.ctx.PushVar(T.typ.arg.var), TypeExpression(T.typ.body))
         if p_body is None:
-          p_body = _Helper(p_arg.ctx, TypeExpression(T.typ.body))
-        p_arg, p_body = d.WeakenContexts(p_arg, p_body)
+          p_body = _Helper(Context(), TypeExpression(T.typ.body))
+          p_body = d.WeakenToContext(p_body, p_a.ctx.PushVar(T.typ.arg.var))
+        p_arg = d.VarRule(T.typ.arg.var, p_t)
         return d.AbstRule(T.typ.arg.var, p_body, p_fn_k)
   _Helper(jdgmnt.ctx, jdgmnt.stmt.subj)
   return d
@@ -2112,7 +2095,6 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
           dt = DeriveType(Judgement(ctx, Statement(M.term.arg.var.typ)))
           p_t = d.Merge(dt)
         p_fn_t, p_t = d.WeakenContexts(p_fn_t, p_t)
-
         p_body = d.PremissForTerm(p_t.ctx.PushVar(M.term.arg.var), Expression(M.term.body))
         if p_body is None:
           p_body = _Helper(p_t.ctx.PushVar(M.term.arg.var), Expression(M.term.body))
