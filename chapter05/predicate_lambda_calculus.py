@@ -45,9 +45,9 @@ class PiKind(Kind):
     return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
-    if self._IsArrow():
+    if self.IsArrow():
       body_str = str(self.body)
-      if isinstance(self.body.kind, PiKind) and self.body.kind._IsArrow():
+      if isinstance(self.body.kind, PiKind) and self.body.kind.IsArrow():
         body_str = body_str[1:-1]
       arg_str = str(self.arg.typ)
       arg_kind = str(self.arg.typ.kind)[:-2]
@@ -58,7 +58,7 @@ class PiKind(Kind):
     args = str(self.arg)
     if isinstance(body, PiKind):
       while isinstance(body, PiKind):
-        if body._IsArrow():  # Arrow
+        if body.IsArrow():  # Arrow
           break
         args = f'{args},{body.arg}'
         body = body.BodyKind()
@@ -70,7 +70,7 @@ class PiKind(Kind):
       return self.body.kind
     return self.body
 
-  def _IsArrow(self):
+  def IsArrow(self):
     return (
         isinstance(self.body, KindExpression)
         and not FreeVars(self.body.Copy()).Contains(self.arg.var)
@@ -178,9 +178,9 @@ class PiType(Type):
     return (self.arg, self.body) == (other.arg, other.body)
 
   def __str__(self):
-    if self._IsArrow():
+    if self.IsArrow():
       body_str = str(self.body)
-      if isinstance(self.BodyType(), PiType) and self.BodyType()._IsArrow():
+      if isinstance(self.BodyType(), PiType) and self.BodyType().IsArrow():
         body_str = body_str[1:-1]
       arg_str = str(self.arg.typ)
       arg_kind = str(self.arg.typ.kind)[:-2]
@@ -191,7 +191,7 @@ class PiType(Type):
     args = str(self.arg)
     if isinstance(body, PiType):
       while isinstance(body, PiType):
-        if body._IsArrow():  # Arrow
+        if body.IsArrow():  # Arrow
           break
         args = f'{args},{body.arg}'
         body = body.BodyType()
@@ -207,7 +207,7 @@ class PiType(Type):
       return self.body.typ
     return self.body
 
-  def _IsArrow(self):
+  def IsArrow(self):
     return (
         isinstance(self.body, TypeExpression)
         and not FreeVars(self.body.Copy()).Contains(self.arg.var)
@@ -661,6 +661,90 @@ class Multiset[T]:
     return len(self.elems)
 
 
+class ProperTypes(Multiset[TypeVar]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
+    self.elems = []
+    match M:
+      case KindExpression():
+        self._FindKindProperTypes(M)
+      case TypeExpression():
+        self._FindTypeProperTypes(M)
+      case Expression():
+        self._FindTermProperTypes(M)
+      case _:
+        raise NotImplementedError(f'Unexpected input to FreeVars {M}')
+    self.elems = list(set(self.elems))
+  
+  def _FindKindProperTypes(self, K: KindExpression):
+    assert isinstance(K, KindExpression)
+    if isinstance(K.kind, PiKind):
+      self.elems += ProperTypes(K.kind.arg.typ).elems + ProperTypes(K.kind.body).elems
+
+  def _FindTypeProperTypes(self, T: TypeExpression):
+    assert isinstance(T, TypeExpression)
+    match T.typ:
+      case TypeVar():
+        if T.kind == Star() and T.typ not in self.elems:
+          self.elems.append(T.typ)
+      case PiType() | TAbstract():
+        self.elems += ProperTypes(T.typ.arg.typ).elems + ProperTypes(T.typ.body).elems
+      case TApply():
+        self.elems += ProperTypes(T.typ.fn).elems + ProperTypes(T.typ.arg).elems
+    self.elems += ProperTypes(T.typ.kind).elems
+
+  def _FindTermProperTypes(self, M: Expression):
+    assert isinstance(M, Expression)
+    match M.term:
+      case Apply():
+        self.elems += ProperTypes(M.term.fn).elems +  ProperTypes(M.term.arg).elems
+      case Abstract():
+        self._FindTypeProperTypes(M.term.arg.typ)
+        self.elems += ProperTypes(M.term.body).elems
+    self.elems += ProperTypes(M.typ).elems
+
+
+class ArrowTypes(Multiset[TypeVar]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
+    self.elems = []
+    match M:
+      case KindExpression():
+        self._FindKindArrowTypes(M)
+      case TypeExpression():
+        self._FindTypeArrowTypes(M)
+      case Expression():
+        self._FindTermArrowTypes(M)
+      case _:
+        raise NotImplementedError(f'Unexpected input to FreeVars {M}')
+    self.elems = list(set(self.elems))
+  
+  def _FindKindArrowTypes(self, K: KindExpression):
+    assert isinstance(K, KindExpression)
+    if isinstance(K.kind, PiKind):
+      self.elems += ArrowTypes(K.kind.arg.typ).elems + ArrowTypes(K.kind.body).elems
+
+  def _FindTypeArrowTypes(self, T: TypeExpression):
+    assert isinstance(T, TypeExpression)
+    match T.typ:
+      case TypeVar():
+        if isinstance(T.Kind(), PiKind) and T.Kind().IsArrow() and T.typ not in self.elems:
+          self.elems.append(T.typ)
+      case PiType() | TAbstract():
+        self.elems += ArrowTypes(T.typ.arg.typ).elems + ArrowTypes(T.typ.body).elems
+      case TApply():
+        self.elems += ArrowTypes(T.typ.fn).elems + ArrowTypes(T.typ.arg).elems
+    self.elems += ArrowTypes(T.typ.kind).elems
+
+  def _FindTermArrowTypes(self, M: Expression):
+    assert isinstance(M, Expression)
+    match M.term:
+      case Apply():
+        self.elems += ArrowTypes(M.term.fn).elems +  ArrowTypes(M.term.arg).elems
+      case Abstract():
+        self._FindTypeArrowTypes(M.term.arg.typ)
+        self.elems += ArrowTypes(M.term.body).elems
+    self.elems += ArrowTypes(M.typ).elems
+
+
 class FreeVars(Multiset[Var]):
   def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
     self.elems = []
@@ -698,7 +782,7 @@ class FreeVars(Multiset[Var]):
       case Abstract():
         self._FindTypeFreeVars(M.term.arg.typ)
         self.elems += FreeVars(M.term.body).elems
-    self.elems += FreeVars(M.typ)
+    self.elems += FreeVars(M.typ).elems
 
 
 class DeBrujinIndices(dict[Union[Var], int]):
@@ -1672,8 +1756,11 @@ class Derivation:
     self.conclusions: list[Judgement] = []
 
   def _AddRule(self, rule: DerivationRule) -> Judgement:
-    self.rules.append(rule)
     concl = rule.Conclusion()
+    for old_rule, old_concl in zip(self.rules, self.conclusions):
+      if type(old_rule) == type(rule) and old_concl == concl:
+        return old_concl
+    self.rules.append(rule)
     self.conclusions.append(concl)
     return concl
 
@@ -1695,7 +1782,8 @@ class Derivation:
         if rule.ctx == premiss.ctx:
           return self.conclusions[i]
         if rule.ctx < premiss.ctx:
-          return self.WeakenToContext(self.conclusions[i], premiss.ctx)
+          p = self._AddRule(VarRule(u, rule.premisses[0]))
+          return self.WeakenToContext(p, premiss.ctx)
     return self._AddRule(VarRule(u, premiss))
 
   def WeakRule(
@@ -1846,7 +1934,7 @@ class Derivation:
     for new_rule, new_concl in zip(d.rules, d.conclusions):
       found_concl = False
       for concl in self.conclusions:
-        if concl == new_concl:
+        if str(concl) == str(new_concl):
           premiss_map[str(new_concl)] = concl
           found_concl = True
           break
@@ -1931,6 +2019,8 @@ class Derivation:
       for decl in concl.ctx.Dom():
         if decl in flags:
           continue
+        if not any(isinstance(rule, R) for R in [WeakRule, VarRule]):
+          continue
         seperator = (
             ' ' * len(f'({key}) ')
             + '| ' * indent_count
@@ -1947,12 +2037,16 @@ class Derivation:
           indent_count -= 1
           indent = '| ' * indent_count
           line = f'({key}) {indent}{concl.stmt}    {justif}'
-          assert rule.arg == flags.pop()
+          arg = flags.pop()
+          if rule.arg != arg:
+            raise Exception(f'{rule.arg} vs {arg}')
         case AbstRule():
           indent_count -= 1
           indent = '| ' * indent_count
           line = f'({key}) {indent}{concl.stmt}    {justif}'
-          assert rule.arg == flags.pop(), concl
+          arg = flags.pop()
+          if rule.arg != arg:
+            raise Exception(f'{rule.arg} vs {arg}')
         case DerivationRule():
           line = f'({key}) {indent}{concl.stmt}    {justif}'
       result.append(line)
@@ -1961,18 +2055,28 @@ class Derivation:
 
   def ShortenedFlagFormat(self) -> str:
     flag_vars = []
+    weak_vars = []
     for rule in self.rules:
       match rule:
         case VarRule():
-          flag_vars.append(rule.u)
+          if rule.u not in flag_vars:
+            flag_vars.append(rule.u)
+        case FormRule():
+          if flag_vars and rule.arg == flag_vars[-1]:
+            weak_vars.append(flag_vars.pop())
         case AbstRule():
+          if rule.arg in weak_vars:
+            weak_vars.remove(rule.arg)
+            flag_vars.append(rule.arg)
           arg = flag_vars.pop()
-          assert rule.arg == arg
+          if rule.arg != arg:
+            raise ValueError(f'{rule.arg} vs {arg}')
     ctx = self.conclusions[-1].ctx
-    weak_vars = [u for u in flag_vars if u not in ctx.Dom()]
+    weak_vars += [u for u in flag_vars if u not in ctx.Dom()]
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
+    raised_flags = []
     for rule, concl in zip(self.rules, self.conclusions):
       indent = '| ' * indent_count
       if (
@@ -1981,7 +2085,7 @@ class Derivation:
               isinstance(rule, ApplRule)
               and isinstance(concl.stmt.subj, TypeExpression)
           )
-          or (isinstance(rule, VarRule) and rule.u in weak_vars)
+          or (isinstance(rule, VarRule) and rule.u in (weak_vars + raised_flags))
       ):
         keys[concl] = ''
         justif = ''
@@ -1996,8 +2100,9 @@ class Derivation:
         case FormRule() | SortRule() | WeakRule():
           continue
         case VarRule():
-          if rule.u in weak_vars:
+          if rule.u in (weak_vars + raised_flags):
             continue
+          raised_flags.append(rule.u)
           seperator = (
               ' ' * len(f'({key}) ')
               + '| ' * indent_count
@@ -2028,6 +2133,30 @@ def DeriveKind(jdgmnt: Judgement) -> Derivation:
     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
   d = Derivation()
   def _Helper(ctx: Context, K: KindExpression):
+    for t in ProperTypes(K):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for t in ArrowTypes(K):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for u in FreeVars(K):
+      if not ctx.ContainsVar(u):
+        p_t = d.PremissForType(ctx, u.typ)
+        if p_t is None:
+          dt = DeriveType(Judgement(ctx, Statement(u.typ)))
+          p_t = d.Merge(dt)
+        p = d.VarRule(u, p_t)
+        ctx = p.ctx
     match K.kind:
       case Star():
         if d.rules and isinstance(d.rules[-1], SortRule):
@@ -2062,21 +2191,39 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
   d = Derivation()
   def _Helper(ctx: Context, T: TypeExpression):
+    for t in ProperTypes(T):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for t in ArrowTypes(T):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for u in FreeVars(T):
+      if not ctx.ContainsVar(u):
+        p_t = d.PremissForType(ctx, u.typ)
+        if p_t is None:
+          dt = DeriveType(Judgement(ctx, Statement(u.typ)))
+          p_t = d.Merge(dt)
+        p = d.VarRule(u, p_t)
+        ctx = p.ctx
     match T.typ:
       case TypeVar():
-        p = d.PremissForKind(ctx, T.kind)
-        if p is None:
-          dk = DeriveKind(Judgement(Context(), Statement(T.kind)))
-          p = d.Merge(dk)
-          p = d.WeakenToContext(p, ctx)
-        return d.VarRule(T.typ, p)
+        p_v = d.PremissForType(ctx, T.typ)
+        assert p_v is not None, d.rules
+        return p_v
       case PiType():
         p_a = d.PremissForType(ctx, T.typ.arg.typ)
         if p_a is None:
-          dt = DeriveType(
-              Judgement(Context(), Statement(TypeExpression(T.typ.arg.typ)))
-          )
-          p_a = d.Merge(dt)
+          p_a = _Helper(ctx, TypeExpression(T.typ.arg.typ))
           p_a = d.WeakenToContext(p_a, ctx)
         p_arg = d.VarRule(T.typ.arg.var, p_a)
         p_body = d.PremissForType(p_arg.ctx, T.typ.body)
@@ -2109,11 +2256,11 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
           dt = DeriveType(Judgement(ctx, Statement(T.typ.arg.var.typ)))
           p_t = d.Merge(dt)
         p_fn_k, p_t = d.WeakenContexts(p_fn_k, p_t)
-        p_body = d.PremissForType(p_a.ctx.PushVar(T.typ.arg.var), TypeExpression(T.typ.body))
-        if p_body is None:
-          p_body = _Helper(Context(), TypeExpression(T.typ.body))
-          p_body = d.WeakenToContext(p_body, p_a.ctx.PushVar(T.typ.arg.var))
         p_arg = d.VarRule(T.typ.arg.var, p_t)
+        p_body = d.PremissForType(p_arg.ctx, TypeExpression(T.typ.body))
+        if p_body is None:
+          p_body = _Helper(p_arg.ctx, TypeExpression(T.typ.body))
+          p_body = d.WeakenToContext(p_body, p_arg.ctx)
         return d.AbstRule(T.typ.arg.var, p_body, p_fn_k)
   _Helper(jdgmnt.ctx, jdgmnt.stmt.subj)
   return d
@@ -2124,14 +2271,35 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
     raise TypeError(f'Unexpected subject in judgement {jdgmnt}')
   d = Derivation()
   def _Helper(ctx: Context, M: Expression):
+    for t in ProperTypes(M):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for t in ArrowTypes(M):
+      if not ctx.ContainsTypeVar(t):
+        p_k = d.PremissForType(ctx, t.kind)
+        if p_k is None:
+          dk = DeriveKind(Judgement(ctx, Statement(t.kind)))
+          p_k = d.Merge(dk)
+        p = d.VarRule(t, p_k)
+        ctx = p.ctx
+    for u in FreeVars(M):
+      if not ctx.ContainsVar(u):
+        p_t = d.PremissForType(ctx, u.typ)
+        if p_t is None:
+          dt = DeriveType(Judgement(ctx, Statement(u.typ)))
+          p_t = d.Merge(dt)
+        p = d.VarRule(u, p_t)
+        ctx = p.ctx
     match M.term:
       case FreeVar():
-        p_t = d.PremissForType(ctx, M.typ)
-        if p_t is None:
-          dt = DeriveType(Judgement(Context(), Statement(M.typ)))
-          p_t = d.Merge(dt)
-          p_t = d.WeakenToContext(p_t, ctx)
-        return d.VarRule(M.term.var, p_t)
+        p_v = d.PremissForTerm(ctx, M.term)
+        assert p_v is not None
+        return p_v
       case BoundVar():
         raise ValueError(f'Should not need rule for bound var {M.term}')
       case Apply():
@@ -2151,15 +2319,16 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
           p_fn_t = d.WeakenToContext(p_fn_t, ctx)
         p_t = d.PremissForType(ctx, M.term.arg.var.typ)
         if p_t is None:
-          dt = DeriveType(Judgement(ctx, Statement(M.term.arg.var.typ)))
+          dt = DeriveType(Judgement(Context(), Statement(M.term.arg.var.typ)))
           p_t = d.Merge(dt)
-        p_fn_t, p_t = d.WeakenContexts(p_fn_t, p_t)
-        p_body = d.PremissForTerm(p_t.ctx.PushVar(M.term.arg.var), Expression(M.term.body))
-        if p_body is None:
-          p_body = _Helper(p_t.ctx.PushVar(M.term.arg.var), Expression(M.term.body))
-        p_t, p_body = d.WeakenContexts(p_t, p_body)
-        p_fn_t = d.WeakenToContext(p_fn_t, p_body.ctx.PullVar(M.term.arg.var))
+          p_t = d.WeakenToContext(p_t, ctx)
         p_arg = d.VarRule(M.term.arg.var, p_t)
-        return d.AbstRule(M.term.arg.var, p_body, p_fn_t)
+        p_body = d.PremissForTerm(p_arg.ctx, M.term.body)
+        if p_body is None:
+          p_body = _Helper(p_arg.ctx, M.term.body)
+        p_body = d.WeakenToContext(p_body, p_fn_t.ctx)
+        p_fn_t = d.WeakenToContext(p_fn_t, p_body.ctx.PullVar(M.term.arg.var))
+        p = d.AbstRule(M.term.arg.var, p_body, p_fn_t)
+        return p
   _Helper(jdgmnt.ctx, jdgmnt.stmt.subj)
   return d

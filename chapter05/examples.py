@@ -160,7 +160,7 @@ def RunExamples():
   print(AbstRule(x, p1, p2))
 
 
-  print('\nExample from 5.4')
+  print('\nExample from 5.5')
   print('Prove ∀x,y ∈ S: Q(x, y) => ∀u ∈ S: Q(u, u)')
   print('Find inhabitant of type ((Πx:S,y:S.(Q x y)) -> (Πu:S.(Q u u)))')
   S = TypeVar('S', Star())
@@ -170,7 +170,6 @@ def RunExamples():
   u = Var('u', S)
   z_t = TypeExpression(PiType(x, PiType(y, TApply(TApply(Q, x), y))))
   z = Var('z', z_t)
-  inhab = Expression(Apply(Apply(z, u), u))
   inhab = Expression(Abstract(z, Abstract(u, Apply(Apply(z, u), u))))
   d = DeriveTerm(Judgement(Context(), Statement(inhab)))
   print(d.ShortenedFlagFormat())

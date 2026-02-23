@@ -157,7 +157,7 @@ S:*, P:(S -> *), x:S |- ?:(P x), S:*, P:(S -> *) |- (Πx:S.(P x)):*
 ------------------------------------------------------------------
 S:*, P:(S -> *) |- (λx:S.?:(P x)):(Πx:S.(P x))
 
-Example from 5.4
+Example from 5.5
 Prove ∀x,y ∈ S: Q(x, y) => ∀u ∈ S: Q(u, u)
 Find inhabitant of type ((Πx:S,y:S.(Q x y)) -> (Πu:S.(Q u u)))
     |------
