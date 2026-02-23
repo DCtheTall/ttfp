@@ -50,6 +50,25 @@ def RunExercises():
   print('-' * len(line))
   jdgmnt = Judgement(Context(), Statement(inhab))
   print(DeriveTerm(jdgmnt).ShortenedFlagFormat())
+
+
+  print('\nExercise 5.6')
+  print('Prove ((A => (A => B)) => (A => B)) is a tautology')
+  A = TypeVar('A', Star())
+  B = TypeVar('B', Star())
+  x = Var('x', A)
+  y = Var('y', A)
+  z = Var('z', TypeExpression(PiType(x, PiType(y, B))))
+  T = TypeExpression(PiType(z, PiType(x, B)))
+  print('Find an inhabitant of', T)
+  u = Var('u', A)
+  v = Var('v', z.typ)
+  inhab = Expression(Abstract(v, Abstract(u, Apply(Apply(v, u), u))))
+  line = f'Derive {inhab}'
+  print(line)
+  print('-' * len(line))
+  jdgmnt = Judgement(Context(), Statement(inhab))
+  print(DeriveTerm(jdgmnt).ShortenedFlagFormat())
   
 
 
