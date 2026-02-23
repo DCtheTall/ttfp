@@ -30,7 +30,7 @@ def RunExercises():
   print(line)
   print('-' * len(line))
   jdgmnt = Judgement(Context(), Statement(T))
-  print(DeriveType(jdgmnt).FlagFormat())
+  print(DeriveType(jdgmnt).LinearFormat())
 
 
   print('\nExercise 5.5')
@@ -128,6 +128,23 @@ def RunExercises():
   inhab = Expression(
       Abstract(u, Abstract(v, Abstract(w, Apply(Apply(u, w), Apply(v, w)))))
   )
+  line = f'Derive {inhab}'
+  print(line)
+  print('-' * len(line))
+  jdgmnt = Judgement(Context(), Statement(inhab))
+  print(DeriveTerm(jdgmnt).ShortenedFlagFormat())
+
+
+  print('\nExercise 5.8a')
+  S = TypeVar('S', Star())
+  x = Var('x', S)
+  P = TypeVar('P', KindExpression(PiKind(x, Star())))
+  p = Var('p', TypeExpression(TApply(P, x)))
+  Q = TypeVar('Q', KindExpression(PiKind(x, Star())))
+  q = Var('q', TypeExpression(TApply(Q, x)))
+  T = TypeExpression(PiType(x, PiType(p, PiType(q, TApply(P, x)))))
+  print('Find an inhabitant of', T)
+  inhab = Expression(Abstract(x, Abstract(p, Abstract(q, p))))
   line = f'Derive {inhab}'
   print(line)
   print('-' * len(line))

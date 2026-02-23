@@ -1782,8 +1782,8 @@ class Derivation:
         if rule.ctx == premiss.ctx:
           return self.conclusions[i]
         if rule.ctx < premiss.ctx:
-          p = self._AddRule(VarRule(u, rule.premisses[0]))
-          return self.WeakenToContext(p, premiss.ctx)
+          premiss = self.WeakenToContext(rule.premisses[0], premiss.ctx)
+          return self._AddRule(VarRule(u, premiss))
     return self._AddRule(VarRule(u, premiss))
 
   def WeakRule(
@@ -1998,7 +1998,8 @@ class Derivation:
     result = []
     keys: dict[Judgement, str] = {}
     for rule, concl in zip(self.rules, self.conclusions):
-      key = chr(ord('a') + len(keys))
+      # key = chr(ord('a') + len(keys))
+      key = len(keys) + 1
       keys[concl] = key
       justif = self._Justification(rule, keys)
       line = f'({key}) {concl}    {justif}'
@@ -2072,7 +2073,6 @@ class Derivation:
           if rule.arg != arg:
             raise ValueError(f'{rule.arg} vs {arg}')
     ctx = self.conclusions[-1].ctx
-    weak_vars += [u for u in flag_vars if u not in ctx.Dom()]
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
@@ -2100,7 +2100,10 @@ class Derivation:
         case FormRule() | SortRule() | WeakRule():
           continue
         case VarRule():
-          if rule.u in (weak_vars + raised_flags):
+          if rule.u in weak_vars:
+            weak_vars.remove(rule.u)
+            continue
+          if rule.u in raised_flags:
             continue
           raised_flags.append(rule.u)
           seperator = (
