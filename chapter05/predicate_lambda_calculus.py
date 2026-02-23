@@ -499,9 +499,9 @@ class Apply(Term):
     if isinstance(fn, Apply):
       fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
     arg = str(self.arg)
-    k_arg = str(self.arg.typ.kind)[:-2]
-    if arg.endswith(k_arg):
-      arg = arg[:-len(k_arg)-1]
+    t_arg = str(self.arg.typ)[:-2]
+    if arg.endswith(t_arg):
+      arg = arg[:-len(t_arg)-1]
     typ = str(self.typ)
     k_typ = str(self.typ.kind)[:-2]
     if typ.endswith(k_typ):
@@ -1041,7 +1041,7 @@ def Rename(
           N = M.term.body
           if u == x:
             v = BindingVar(y)
-            N = _RenameBoundVars(N, u, v)
+            N = _RenameBoundVar(N, u, v)
             N.MaybeBindFreeVarsTo(v)
           else:
             v = u
