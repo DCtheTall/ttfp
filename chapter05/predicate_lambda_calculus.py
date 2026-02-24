@@ -1997,7 +1997,11 @@ class Derivation:
         return f'(form) on ({as_key}) and ({bs_key})'
       case ApplRule():
         mab_key = keys[rule.premisses[0]]
+        if not mab_key and str(rule.premisses[0].stmt.subj) in keys:
+          mab_key = keys[str(rule.premisses[0].stmt.subj)]
         na_key = keys[rule.premisses[1]]
+        if not na_key and str(Expression(rule.premisses[1].stmt.subj)) in keys:
+          na_key = keys[str(Expression(rule.premisses[1].stmt.subj))]
         return f'(appl) on ({mab_key}) and ({na_key})'
       case AbstRule():
         xamb_key = keys[rule.premisses[0]]
@@ -2101,14 +2105,18 @@ class Derivation:
               isinstance(rule, ApplRule)
               and isinstance(concl.stmt.subj, TypeExpression)
           )
-          or (
-              isinstance(rule, VarRule)
-              and (rule.u, i) not in flag_vars
-              and (rule.u, -1) not in flag_vars
-          )
       ):
         keys[concl] = ''
         justif = ''
+      elif isinstance(rule, VarRule):
+        if (rule.u, i) in flag_vars or (rule.u, -1) in flag_vars:
+          key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+          keys[concl] = key
+          justif = self._Justification(rule, keys, shorten=True)
+          keys[str(rule.u)] = key
+        else:
+          keys[concl] = ''
+          justif = ''
       elif isinstance(rule, WeakRule):
         premise_concl = rule.premisses[0]
         keys[concl] = keys.get(premise_concl, '')
