@@ -1072,6 +1072,12 @@ def Substitute(
             z = new_vars.pop()
             assert not fv.Contains(z)
             M = Rename(M, M.kind.arg, z)
+          arg = Var(
+              M.kind.arg.var.name,
+              Substitute(
+                  TypeExpression(M.kind.arg.typ), x, N, new_vars, binding
+              )
+          )
           return KindExpression(
               PiKind(
                   M.kind.arg, Substitute(M.kind.body, x, N, new_vars, binding)
@@ -1092,9 +1098,15 @@ def Substitute(
             z = new_vars.pop()
             assert not fv.Contains(z)
             M = Rename(M, M.typ.arg, z)
+          arg = Var(
+              M.typ.arg.var.name,
+              Substitute(
+                  TypeExpression(M.typ.arg.typ), x, N, new_vars, binding
+              )
+          )
           return TypeExpression(
               type(M.typ)(
-                  M.typ.arg, Substitute(M.typ.body, x, N, new_vars, binding)
+                  arg, Substitute(M.typ.body, x, N, new_vars, binding)
               )
           )
         case TApply():
@@ -1132,9 +1144,15 @@ def Substitute(
             z = new_vars.pop()
             assert not fv.Contains(z)
             M = Rename(M, M.term.arg, z)
+          arg = Var(
+              M.term.arg.var.name,
+              Substitute(
+                  TypeExpression(M.term.arg.typ), x, N, new_vars, binding
+              )
+          )
           return Expression(
               Abstract(
-                  M.term.arg, Substitute(M.term.body, x, N, new_vars, binding)
+                  arg, Substitute(M.term.body, x, N, new_vars, binding)
               )
           )
     case _:
@@ -1162,7 +1180,7 @@ def OneStepBetaReduce(
       match M.typ:
         case TypeVar():
           new_k = OneStepBetaReduce(M.typ.kind, new_vars)
-          return TypeExpression(TypeVar(M.typ.typ.name, new_k))
+          return TypeExpression(TypeVar(M.typ.name, new_k))
         case PiType() | TAbstract():
           if not M.typ.arg.typ.BetaNormal():
             new_t = OneStepBetaReduce(M.typ.arg.typ, new_vars)
@@ -2055,29 +2073,27 @@ class Derivation:
     return '\n'.join(result)
 
   def ShortenedFlagFormat(self) -> str:
-    flag_vars = []
-    weak_vars = []
-    for rule in self.rules:
-      match rule:
-        case VarRule():
-          if rule.u not in flag_vars:
-            flag_vars.append(rule.u)
-        case FormRule():
-          if flag_vars and rule.arg == flag_vars[-1]:
-            weak_vars.append(flag_vars.pop())
-        case AbstRule():
-          if rule.arg in weak_vars:
-            weak_vars.remove(rule.arg)
-            flag_vars.append(rule.arg)
-          arg = flag_vars.pop()
-          if rule.arg != arg:
-            raise ValueError(f'{rule.arg} vs {arg}')
-    ctx = self.conclusions[-1].ctx
     result = []
     indent_count = 0
     keys: dict[Judgement, str] = {}
     raised_flags = []
-    for rule, concl in zip(self.rules, self.conclusions):
+    flag_vars = []
+    for u in ProperTypes(self.conclusions[-1].stmt.subj):
+      flag_vars.append((u, -1))
+    for u in ArrowTypes(self.conclusions[-1].stmt.subj):
+      flag_vars.append((u, -1))
+    for u in FreeVars(self.conclusions[-1].stmt.subj):
+      flag_vars.append((u, -1))
+    want_flags = []
+    for i, rule in reversed(list(enumerate(self.rules))):
+      match rule:
+        case AbstRule():
+          want_flags.append(rule.arg)
+        case VarRule():
+          if want_flags and rule.u == want_flags[-1]:
+            want_flags.pop()
+            flag_vars.append((rule.u, i))
+    for i, (rule, concl) in enumerate(zip(self.rules, self.conclusions)):
       indent = '| ' * indent_count
       if (
           any(isinstance(rule, R) for R in [FormRule, SortRule])
@@ -2085,7 +2101,11 @@ class Derivation:
               isinstance(rule, ApplRule)
               and isinstance(concl.stmt.subj, TypeExpression)
           )
-          or (isinstance(rule, VarRule) and rule.u in (weak_vars + raised_flags))
+          or (
+              isinstance(rule, VarRule)
+              and (rule.u, i) not in flag_vars
+              and (rule.u, -1) not in flag_vars
+          )
       ):
         keys[concl] = ''
         justif = ''
@@ -2100,10 +2120,14 @@ class Derivation:
         case FormRule() | SortRule() | WeakRule():
           continue
         case VarRule():
-          if rule.u in weak_vars:
-            weak_vars.remove(rule.u)
-            continue
           if rule.u in raised_flags:
+            continue
+          raise_flag = False
+          for f, j in flag_vars:
+            if rule.u == f and (j == -1 or j == i):
+              raise_flag = True
+              break
+          if not raise_flag:
             continue
           raised_flags.append(rule.u)
           seperator = (
@@ -2226,7 +2250,7 @@ def DeriveType(jdgmnt: Judgement) -> Derivation:
       case PiType():
         p_a = d.PremissForType(ctx, T.typ.arg.typ)
         if p_a is None:
-          p_a = _Helper(ctx, TypeExpression(T.typ.arg.typ))
+          p_a = _Helper(ctx, TypeExpression(T.typ.arg.var.typ))
           p_a = d.WeakenToContext(p_a, ctx)
         p_arg = d.VarRule(T.typ.arg.var, p_a)
         p_body = d.PremissForType(p_arg.ctx, T.typ.body)
@@ -2326,9 +2350,9 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
           p_t = d.Merge(dt)
           p_t = d.WeakenToContext(p_t, ctx)
         p_arg = d.VarRule(M.term.arg.var, p_t)
-        p_body = d.PremissForTerm(p_arg.ctx, M.term.body)
+        p_body = d.PremissForTerm(p_arg.ctx, Expression(M.term.body))
         if p_body is None:
-          p_body = _Helper(p_arg.ctx, M.term.body)
+          p_body = _Helper(p_arg.ctx, Expression(M.term.body))
         p_body = d.WeakenToContext(p_body, p_fn_t.ctx)
         p_fn_t = d.WeakenToContext(p_fn_t, p_body.ctx.PullVar(M.term.arg.var))
         p = d.AbstRule(M.term.arg.var, p_body, p_fn_t)
