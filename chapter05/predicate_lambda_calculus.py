@@ -673,7 +673,7 @@ class ProperTypes(Multiset[TypeVar]):
         self._FindTermProperTypes(M)
       case _:
         raise NotImplementedError(f'Unexpected input to FreeVars {M}')
-    self.elems = list(set(self.elems))
+    self.elems = sorted(list(set(self.elems)), key=str)
   
   def _FindKindProperTypes(self, K: KindExpression):
     assert isinstance(K, KindExpression)
@@ -715,7 +715,7 @@ class ArrowTypes(Multiset[TypeVar]):
         self._FindTermArrowTypes(M)
       case _:
         raise NotImplementedError(f'Unexpected input to FreeVars {M}')
-    self.elems = list(set(self.elems))
+    self.elems = sorted(list(set(self.elems)), key=str)
   
   def _FindKindArrowTypes(self, K: KindExpression):
     assert isinstance(K, KindExpression)
@@ -2109,14 +2109,7 @@ class Derivation:
         keys[concl] = ''
         justif = ''
       elif isinstance(rule, VarRule):
-        if (rule.u, i) in flag_vars or (rule.u, -1) in flag_vars:
-          key = chr(ord('a') + len(set(v for v in keys.values() if v)))
-          keys[concl] = key
-          justif = self._Justification(rule, keys, shorten=True)
-          keys[str(rule.u)] = key
-        else:
-          keys[concl] = ''
-          justif = ''
+        pass
       elif isinstance(rule, WeakRule):
         premise_concl = rule.premisses[0]
         keys[concl] = keys.get(premise_concl, '')
@@ -2138,6 +2131,10 @@ class Derivation:
           if not raise_flag:
             continue
           raised_flags.append(rule.u)
+          key = chr(ord('a') + len(set(v for v in keys.values() if v)))
+          keys[concl] = key
+          justif = self._Justification(rule, keys, shorten=True)
+          keys[str(rule.u)] = key
           seperator = (
               ' ' * len(f'({key}) ')
               + '| ' * indent_count
