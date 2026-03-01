@@ -370,7 +370,7 @@ class Term:
   typ: Type
 
   def __str__(self):
-    raise NotImplementedError('Not implemented')
+    raise NotImplementedError('Do not cast Term subclass to str')
 
   def Type(self):
     typ = self.typ
