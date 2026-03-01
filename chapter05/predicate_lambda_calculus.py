@@ -58,7 +58,7 @@ class PiKind(Kind):
     args = str(self.arg)
     if isinstance(body, PiKind):
       while isinstance(body, PiKind):
-        if body.IsArrow():  # Arrow
+        if body.IsArrow():
           break
         args = f'{args},{body.arg}'
         body = body.BodyKind()
@@ -191,7 +191,7 @@ class PiType(Type):
     args = str(self.arg)
     if isinstance(body, PiType):
       while isinstance(body, PiType):
-        if body.IsArrow():  # Arrow
+        if body.IsArrow():
           break
         args = f'{args},{body.arg}'
         body = body.BodyType()
@@ -678,7 +678,9 @@ class ProperTypes(Multiset[TypeVar]):
   def _FindKindProperTypes(self, K: KindExpression):
     assert isinstance(K, KindExpression)
     if isinstance(K.kind, PiKind):
-      self.elems += ProperTypes(K.kind.arg.typ).elems + ProperTypes(K.kind.body).elems
+      self.elems += (
+          ProperTypes(K.kind.arg.typ).elems + ProperTypes(K.kind.body).elems
+      )
 
   def _FindTypeProperTypes(self, T: TypeExpression):
     assert isinstance(T, TypeExpression)
@@ -687,16 +689,22 @@ class ProperTypes(Multiset[TypeVar]):
         if T.kind == Star() and T.typ not in self.elems:
           self.elems.append(T.typ)
       case PiType() | TAbstract():
-        self.elems += ProperTypes(T.typ.arg.typ).elems + ProperTypes(T.typ.body).elems
+        self.elems += (
+            ProperTypes(T.typ.arg.typ).elems + ProperTypes(T.typ.body).elems
+        )
       case TApply():
-        self.elems += ProperTypes(T.typ.fn).elems + ProperTypes(T.typ.arg).elems
+        self.elems += (
+            ProperTypes(T.typ.fn).elems + ProperTypes(T.typ.arg).elems
+        )
     self.elems += ProperTypes(T.typ.kind).elems
 
   def _FindTermProperTypes(self, M: Expression):
     assert isinstance(M, Expression)
     match M.term:
       case Apply():
-        self.elems += ProperTypes(M.term.fn).elems +  ProperTypes(M.term.arg).elems
+        self.elems += (
+            ProperTypes(M.term.fn).elems +  ProperTypes(M.term.arg).elems
+        )
       case Abstract():
         self._FindTypeProperTypes(M.term.arg.typ)
         self.elems += ProperTypes(M.term.body).elems
@@ -720,16 +728,24 @@ class ArrowTypes(Multiset[TypeVar]):
   def _FindKindArrowTypes(self, K: KindExpression):
     assert isinstance(K, KindExpression)
     if isinstance(K.kind, PiKind):
-      self.elems += ArrowTypes(K.kind.arg.typ).elems + ArrowTypes(K.kind.body).elems
+      self.elems += (
+          ArrowTypes(K.kind.arg.typ).elems + ArrowTypes(K.kind.body).elems
+      )
 
   def _FindTypeArrowTypes(self, T: TypeExpression):
     assert isinstance(T, TypeExpression)
     match T.typ:
       case TypeVar():
-        if isinstance(T.Kind(), PiKind) and T.Kind().IsArrow() and T.typ not in self.elems:
+        if (
+            isinstance(T.Kind(), PiKind)
+            and T.Kind().IsArrow()
+            and T.typ not in self.elems
+        ):
           self.elems.append(T.typ)
       case PiType() | TAbstract():
-        self.elems += ArrowTypes(T.typ.arg.typ).elems + ArrowTypes(T.typ.body).elems
+        self.elems += (
+            ArrowTypes(T.typ.arg.typ).elems + ArrowTypes(T.typ.body).elems
+        )
       case TApply():
         self.elems += ArrowTypes(T.typ.fn).elems + ArrowTypes(T.typ.arg).elems
     self.elems += ArrowTypes(T.typ.kind).elems
@@ -738,7 +754,9 @@ class ArrowTypes(Multiset[TypeVar]):
     assert isinstance(M, Expression)
     match M.term:
       case Apply():
-        self.elems += ArrowTypes(M.term.fn).elems +  ArrowTypes(M.term.arg).elems
+        self.elems += (
+            ArrowTypes(M.term.fn).elems +  ArrowTypes(M.term.arg).elems
+        )
       case Abstract():
         self._FindTypeArrowTypes(M.term.arg.typ)
         self.elems += ArrowTypes(M.term.body).elems
@@ -761,13 +779,17 @@ class FreeVars(Multiset[Var]):
   def _FindKindFreeVars(self, K: KindExpression):
     assert isinstance(K, KindExpression)
     if isinstance(K.kind, PiKind):
-      self.elems += FreeVars(K.kind.arg.typ).elems + FreeVars(K.kind.body).elems
+      self.elems += (
+          FreeVars(K.kind.arg.typ).elems + FreeVars(K.kind.body).elems
+      )
 
   def _FindTypeFreeVars(self, T: TypeExpression):
     assert isinstance(T, TypeExpression)
     match T.typ:
       case PiType() | TAbstract():
-        self.elems += FreeVars(T.typ.arg.typ).elems + FreeVars(T.typ.body).elems
+        self.elems += (
+            FreeVars(T.typ.arg.typ).elems + FreeVars(T.typ.body).elems
+        )
       case TApply():
         self.elems += FreeVars(T.typ.fn).elems + FreeVars(T.typ.arg).elems
     self.elems += FreeVars(T.typ.kind).elems
@@ -797,7 +819,9 @@ def KAlphaEquiv(
     x: KindExpression, y: KindExpression,
     de_brujin: Optional[DeBrujinIndices] = None
 ) -> bool:
-  def _Helper(x: KindExpression, y: KindExpression, de_brujin: DeBrujinIndices) -> bool:
+  def _Helper(
+      x: KindExpression, y: KindExpression, de_brujin: DeBrujinIndices
+  ) -> bool:
     match x.kind:
       case Star():
         return x.kind == y.kind
@@ -1473,7 +1497,10 @@ class Statement:
         raise NotImplementedError(f'Unexpected input to Statement {subj}')
 
   def __str__(self):
-    if isinstance(self.subj, Expression) and isinstance(self.subj.term, BoundVar):
+    if (
+        isinstance(self.subj, Expression)
+        and isinstance(self.subj.term, BoundVar)
+    ):
       return str(self.subj.term.var)
     return str(self.subj)
 
@@ -2346,7 +2373,9 @@ def DeriveTerm(jdgmnt: Judgement) -> Derivation:
       case Abstract():
         p_fn_t = d.PremissForType(ctx, TypeExpression(M.Type()))
         if p_fn_t is None:
-          dt = DeriveType(Judgement(Context(), Statement(TypeExpression(M.Type()))))
+          dt = DeriveType(
+              Judgement(Context(), Statement(TypeExpression(M.Type())))
+          )
           p_fn_t = d.Merge(dt)
           p_fn_t = d.WeakenToContext(p_fn_t, ctx)
         p_t = d.PremissForType(ctx, M.term.arg.var.typ)
