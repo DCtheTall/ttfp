@@ -4,7 +4,32 @@ Chapter 5 Examples
 
 """
 
-from predicate_lambda_calculus import *
+from predicate_lambda_calculus import (
+    AbstRule,
+    Abstract,
+    ApplRule,
+    Apply,
+    Context,
+    ConvRule,
+    Derivation,
+    DeriveTerm,
+    Expression,
+    FormRule,
+    Judgement,
+    KindExpression,
+    PiKind,
+    PiType,
+    SortRule,
+    Star,
+    Statement,
+    TAbstract,
+    TApply,
+    TypeExpression,
+    TypeVar,
+    Var,
+    VarRule,
+    WeakRule,
+)
 
 
 def RunExamples():

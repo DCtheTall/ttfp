@@ -4,7 +4,25 @@ Chapter 5 Exercises
 
 """
 
-from predicate_lambda_calculus import *
+from predicate_lambda_calculus import (
+    Abstract,
+    Apply,
+    Context,
+    DeriveKind,
+    DeriveTerm,
+    DeriveType,
+    Expression,
+    Judgement,
+    KindExpression,
+    PiKind,
+    PiType,
+    Star,
+    Statement,
+    TApply,
+    TypeExpression,
+    TypeVar,
+    Var,
+)
 
 
 def RunExercises():
