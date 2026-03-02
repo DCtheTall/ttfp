@@ -295,6 +295,55 @@ class PiType(Type):
     return not FreeVars(self.body.Copy()).Contains(self.arg.var)
 
 
+class TAbstract(Type):
+  def __init__(
+      self, arg: Union[TypeVar, BindingTypeVar, Var, BindingVar], body: Type
+  ):
+    match arg:
+      case BindingTypeVar() | BindingVar():
+        pass
+      case Var():
+        arg = BindingVar(arg)
+      case TypeVar():
+        arg = BindingTypeVar(arg)
+      case _:
+        raise NotImplementedError(f'Unexpected argument to PiKind {arg}')
+    self.arg = arg
+    self.body = body
+    if isinstance(body, TypeExpression):
+      if isinstance(self.arg, Type):
+        self.body.MaybeBindFreeTypesTo(self.arg)
+      else:
+        self.body.MaybeBindFreeVarsTo(self.arg)
+    self.kind = PiKind(self.arg, self.body.kind)
+
+  def __eq__(self, other):
+    if isinstance(other, TypeExpression):
+      other = other.typ
+    if not isinstance(other, TAbstract):
+      return False
+    return (self.arg, self.body) == (other.arg, other.body)
+
+  def __str__(self):
+    body = self.BodyType()
+    args = str(self.arg)
+    if isinstance(body, TAbstract):
+      while isinstance(body, TAbstract):
+        args = f'{args},{body.arg}'
+        body = body.BodyType()
+    body_kind = str(body.kind)[:-2]
+    body = str(body)
+    if body.endswith(body_kind):
+      body = body[:-len(body_kind)-1]
+    kind = str(self.kind)[:-2]
+    return f'(λ{args}.{body}):{kind}'
+
+  def BodyType(self) -> Type:
+    if isinstance(self.body, TypeExpression):
+      return self.body.typ
+    return self.body
+
+
 class TypeExpression(Type):
   typ: Type
   kind: Kind
@@ -305,8 +354,8 @@ class TypeExpression(Type):
         self.typ = typ.Copy().typ
       case TypeVar():
         self.typ = FreeTypeVar(typ)
-      case PiType():
-        self.typ = PiType(typ.arg, TypeExpression(typ.body))
+      case PiType() | TAbstract():
+        self.typ = type(typ)(typ.arg, TypeExpression(typ.body))
       # TODO rest
       case _:
         raise NotImplementedError(f'Unexpected input to TypeExpression {typ}')
@@ -325,8 +374,10 @@ class TypeExpression(Type):
     match self.typ:
       case FreeTypeVar() | BoundTypeVar():
         return TypeExpression(self.Type())
-      case PiType():
-        return TypeExpression(PiType(self.typ.arg, self.typ.body.Copy()))
+      case PiType() | TAbstract():
+        return TypeExpression(
+            type(self.typ)(self.typ.arg, self.typ.body.Copy())
+        )
       # TODO rest
       case _:
         raise NotImplementedError(
@@ -341,77 +392,24 @@ class TypeExpression(Type):
           self.typ = BoundTypeVar(btv, self.typ)
       case BoundTypeVar():
         pass
-      case PiType():
+      case PiType() | TAbstract():
+        if isinstance(self.typ.arg, Type):
+          self.typ.arg.kind.MaybeBindFreeTypesTo(btv)
+        else:
+          self.typ.arg.typ.MaybeBindFreeTypesTo(btv)
         self.typ.body.MaybeBindFreeTypesTo(btv)
       # TODO rest
 
   def MaybeBindFreeVarsTo(self, bv: BindingVar):
     self.kind.MaybeBindFreeVarsTo(bv)
     match self.typ:
-      case PiType():
-        self.typ.arg.typ.MaybeBindFreeVarsTo(bv)
+      case PiType() | TAbstract():
+        if isinstance(self.typ.arg, Type):
+          self.typ.arg.kind.MaybeBindFreeVarsTo(bv)
+        else:
+          self.typ.arg.typ.MaybeBindFreeVarsTo(bv)
         self.typ.body.MaybeBindFreeVarsTo(bv)
       # TODO rest
-
-
-class Multiset[T]:
-  elems: list[T]
-
-  def Contains(self, x: T) -> bool:
-    return x in self.elems
-
-  def __init__(self, xs: Sequence[T]):
-    self.elems = list(xs)
-
-  def __str__(self):
-    if len(self) == 0:
-      return 'Ø'
-    elems = ', '.join([str(x) for x in self])
-    return f'[{elems}]'
-
-  def __iter__(self):
-    for el in self.elems:
-      yield el
-
-  def __len__(self):
-    return len(self.elems)
-
-
-class FreeTypeVars(Multiset[TypeVar]):
-  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
-    self.elems = []
-    match M:
-      case KindExpression():
-        self._FindKindFreeTypeVars(M)
-      case TypeExpression():
-        self._FindTypeFreeTypeVars(M)
-      case Expression():
-        self._FindTermFreeTypeVars(M)
-      case _:
-        raise NotImplementedError(f'Unexpected input to FreeTypeVars {M}')
-  
-  def _FindKindFreeTypeVars(self, K: KindExpression):
-    if isinstance(K.kind, PiKind):
-      if isinstance(K.kind.arg, Type):
-        self.elems += FreeTypeVars(K.kind.arg.kind).elems
-      else:
-        self.elems += FreeTypeVars(K.kind.arg.typ).elems
-      self.elems += FreeTypeVars(K.kind.body).elems
-
-  def _FindTypeFreeTypeVars(self, T: TypeExpression):
-    self.elems += FreeTypeVars(T.kind).elems
-    match T.typ:
-      case FreeTypeVar():
-        self.elems.append(T.Type())
-      case BoundTypeVar():
-        pass
-      case PiType():
-        self.elems += FreeTypeVars(T.typ.body).elems
-      # TODO rest
-
-  def _FindTermFreeTypeVars(self, M: Expression):
-    self.elems += FreeTypeVars(M.typ).elems
-    # TODO rest
 
 
 class Term:
@@ -553,6 +551,70 @@ class Expression(Term):
       # TODO rest
 
 
+class Multiset[T]:
+  elems: list[T]
+
+  def Contains(self, x: T) -> bool:
+    return x in self.elems
+
+  def __init__(self, xs: Sequence[T]):
+    self.elems = list(xs)
+
+  def __str__(self):
+    if len(self) == 0:
+      return 'Ø'
+    elems = ', '.join([str(x) for x in self])
+    return f'[{elems}]'
+
+  def __iter__(self):
+    for el in self.elems:
+      yield el
+
+  def __len__(self):
+    return len(self.elems)
+
+
+class FreeTypeVars(Multiset[TypeVar]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
+    self.elems = []
+    match M:
+      case KindExpression():
+        self._FindKindFreeTypeVars(M)
+      case TypeExpression():
+        self._FindTypeFreeTypeVars(M)
+      case Expression():
+        self._FindTermFreeTypeVars(M)
+      case _:
+        raise NotImplementedError(f'Unexpected input to FreeTypeVars {M}')
+  
+  def _FindKindFreeTypeVars(self, K: KindExpression):
+    if isinstance(K.kind, PiKind):
+      if isinstance(K.kind.arg, Type):
+        self.elems += FreeTypeVars(K.kind.arg.kind).elems
+      else:
+        self.elems += FreeTypeVars(K.kind.arg.typ).elems
+      self.elems += FreeTypeVars(K.kind.body).elems
+
+  def _FindTypeFreeTypeVars(self, T: TypeExpression):
+    self.elems += FreeTypeVars(T.kind).elems
+    match T.typ:
+      case FreeTypeVar():
+        self.elems.append(T.Type())
+      case BoundTypeVar():
+        pass
+      case PiType() | TAbstract():
+        if isinstance(T.typ.arg, Type):
+          self.elems += FreeTypeVars(T.typ.arg.kind).elems
+        else:
+          self.elems += FreeTypeVars(T.typ.arg.typ).elems
+        self.elems += FreeTypeVars(T.typ.body).elems
+      # TODO rest
+
+  def _FindTermFreeTypeVars(self, M: Expression):
+    self.elems += FreeTypeVars(M.typ).elems
+    # TODO rest
+
+
 class FreeVars(Multiset[Var]):
   def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
     self.elems = []
@@ -577,7 +639,11 @@ class FreeVars(Multiset[Var]):
   def _FindTypeFreeVars(self, T: TypeExpression):
     self.elems += FreeVars(T.kind).elems
     match T.typ:
-      case PiType():
+      case PiType() | TAbstract():
+        if isinstance(T.typ.arg, Type):
+          self.elems += FreeVars(T.typ.arg.kind)
+        else:
+          self.elems += FreeVars(T.typ.arg.typ)
         self.elems += FreeVars(T.typ.body).elems
     # TODO rest
 

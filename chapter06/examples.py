@@ -30,10 +30,14 @@ def RunExamples():
   print(TypeExpression(PiType(A, C)))
   print(TypeExpression(PiType(A, B)))
   print(TypeExpression(PiType(B, A)))
-  print(TypeExpression(PiType(a, B)))
   print(TypeExpression(PiType(a, PiType(b, C))))
   ab = Var('ab', PiType(a, B))
   print(TypeExpression(PiType(ab, C)))
+
+  print(TypeExpression(TAbstract(A, PiType(a, A))))
+  print(TypeExpression(TAbstract(B, A)))
+  print(TypeExpression(TAbstract(a, A)))
+  print(TypeExpression(TAbstract(a, B)))
 
 
 if __name__ == '__main__':
