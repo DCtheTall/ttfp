@@ -465,7 +465,7 @@ class BoundVar(Occurrence):
   def BoundTo(self, bv: BindingVar) -> bool:
     return self.bv == bv
 
-  def Copy(self) -> 'Binding':
+  def Copy(self) -> 'BoundVar':
     return BoundVar(self.bv, FreeVar(Var(self.var.name, self.typ)))
 
 

@@ -28,11 +28,10 @@ class Star(Kind):
 class PiKind(Kind):
   def __init__(self, arg: Union[TypeVar, BindingTypeVar, Var], body: Kind):
     match arg:
-      case BindingTypeVar():  # TODO BindingVar
+      case BindingTypeVar() | BindingVar():
         pass
       case Var():
-        # TODO
-        pass
+        arg = BindingVar(arg)
       case TypeVar():
         arg = BindingTypeVar(arg)
       case _:
@@ -43,11 +42,11 @@ class PiKind(Kind):
       if isinstance(self.arg, Type):
         self.body.MaybeBindFreeTypesTo(self.arg)
       else:
-        raise NotImplementedError('TODO')
+        self.body.MaybeBindFreeVarsTo(self.arg)
 
   def __eq__(self, other):
-    # if isinstance(other, KindExpression):
-    #   other = other.kind
+    if isinstance(other, KindExpression):
+      other = other.kind
     if not isinstance(other, PiKind):
       return False
     return (self.arg, self.body) == (other.arg, other.body)
@@ -82,14 +81,11 @@ class PiKind(Kind):
     return self.body
 
   def IsArrow(self) -> bool:
-    if isinstance(self.arg, Type):
-      return (
-          isinstance(self.body, KindExpression)
-          and not FreeTypeVars(self.body.Copy()).Contains(self.arg.typ)
-      )
-    else:
-      # TODO
+    if not isinstance(self.body, KindExpression):
       return False
+    if isinstance(self.arg, Type):
+      return not FreeTypeVars(self.body.Copy()).Contains(self.arg.typ)
+    return not FreeVars(self.body.Copy()).Contains(self.arg.var)
 
 
 class KindExpression(Kind):
@@ -125,8 +121,16 @@ class KindExpression(Kind):
       if isinstance(self.kind.arg, Type):
         self.kind.arg.kind.MaybeBindFreeTypesTo(btv)
       else:
-        raise NotImplementedError('TODO')
+        self.kind.arg.typ.MaybeBindFreeTypesTo(btv)
       self.kind.body.MaybeBindFreeTypesTo(btv)
+
+  def MaybeBindFreeVarsTo(self, bv: BindingVar):
+    if isinstance(self.kind, PiKind):
+      if isinstance(self.kind.arg, Type):
+        self.kind.arg.kind.MaybeBindFreeVarsTo(btv)
+      else:
+        self.kind.arg.typ.MaybeBindFreeVarsTo(btv)
+      self.kind.body.MaybeBindFreeVarsTo(btv)
 
 
 class Type:
@@ -137,8 +141,8 @@ class Type:
 
   def Kind(self):
     kind = self.kind
-    # if isinstance(kind, KindExpression):
-    #   kind = kind.kind
+    if isinstance(kind, KindExpression):
+      kind = kind.kind
     return kind
 
 
@@ -152,8 +156,8 @@ class TypeVar(Type):
     return f'{self.name}:{kind_str}'
 
   def __eq__(self, other):
-    # if isinstance(other, TypeExpression):
-    #   other = other.typ
+    if isinstance(other, TypeExpression):
+      other = other.typ
     if not isinstance(other, TypeVar):
       return False
     return (self.name, self.kind) == (other.name, other.kind)
@@ -162,7 +166,7 @@ class TypeVar(Type):
 class TOccurrence(Type):
   def __init__(self, typ: TypeVar):
     self.typ = typ
-    self.kind = typ.kind
+    self.kind = KindExpression(typ.kind)
   
   def __eq__(self, other):
     if isinstance(other, TOccurrence):
@@ -170,7 +174,12 @@ class TOccurrence(Type):
     return self.typ == other
 
   def __str__(self):
-    return str(self.typ)
+    tv_str = str(self.typ)
+    tv_kind = str(self.typ.kind)[:-2]
+    if tv_str.endswith(tv_kind):
+      tv_str = tv_str[:-len(tv_kind)-1]
+    kind_str = str(self.kind)[:-2]
+    return f'{tv_str}:{kind_str}'
 
 
 class FreeTypeVar(TOccurrence):
@@ -196,7 +205,8 @@ class BoundTypeVar(TOccurrence):
     assert isinstance(ftyp, FreeTypeVar)
     self.bt = bt
     self.typ = ftyp.typ
-    self.kind = ftyp.kind
+    self.kind = KindExpression(ftyp.kind)
+    self.kind.MaybeBindFreeTypesTo(self.bt)
     if self.bt.typ != self.typ:
       raise TypeError(
           f'Cannot bind variable with type {self.bt} '
@@ -223,14 +233,8 @@ class TypeExpression(Type):
         raise NotImplementedError(f'Unexpected input to TypeExpression {typ}')
     self.kind = KindExpression(self.typ.kind)
 
-  def MaybeBindFreeTypesTo(self):
-    match self.typ:
-      case FreeTypeVar():
-        if btv.ShouldBind(self.typ):
-          self.typ = BoundTypeVar(btv, self.typ)
-      case BoundTypeVar():
-        pass
-      # TODO rest
+  def __str__(self):
+    return str(self.typ)
 
   def Type(self) -> Type:
     typ = self.typ
@@ -247,6 +251,20 @@ class TypeExpression(Type):
         raise NotImplementedError(
             f'Unexpected member of TypeExpression {self.typ}'
         )
+
+  def MaybeBindFreeTypesTo(self, btv: BindingTypeVar):
+    self.kind.MaybeBindFreeTypesTo(btv)
+    match self.typ:
+      case FreeTypeVar():
+        if btv.ShouldBind(self.typ):
+          self.typ = BoundTypeVar(btv, self.typ)
+      case BoundTypeVar():
+        pass
+      # TODO rest
+
+  def MaybeBindFreeVarsTo(self):
+    self.kind.MaybeBindFreeVarsTo(btv)
+    # TODO rest
 
 
 class Multiset[T]:
@@ -273,15 +291,15 @@ class Multiset[T]:
 
 
 class FreeTypeVars(Multiset[TypeVar]):
-  # TODO Add Expression.
-  def __init__(self, M: Union[KindExpression, TypeExpression]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
     self.elems = []
     match M:
       case KindExpression():
         self._FindKindFreeTypeVars(M)
       case TypeExpression():
         self._FindTypeFreeTypeVars(M)
-      # TODO Expression
+      case Expression():
+        self._FindTermFreeTypeVars(M)
       case _:
         raise NotImplementedError(f'Unexpected input to FreeTypeVars {M}')
   
@@ -290,16 +308,21 @@ class FreeTypeVars(Multiset[TypeVar]):
       if isinstance(K.kind.arg, Type):
         self.elems += FreeTypeVars(K.kind.arg.kind).elems
       else:
-        # self.elems += FreeTypeVars(K.kind.arg.typ).elems
-        raise NotImplementedError('TODO')
+        self.elems += FreeTypeVars(K.kind.arg.typ).elems
+      self.elems += FreeTypeVars(K.kind.body).elems
 
   def _FindTypeFreeTypeVars(self, T: TypeExpression):
+    self.elems += FreeTypeVars(T.kind).elems
     match T.typ:
       case FreeTypeVar():
         self.elems.append(T.Type())
       case BoundTypeVar():
         pass
       # TODO rest
+
+  def _FindTermFreeTypeVars(self, M: Expression):
+    self.elems += FreeTypeVars(M.typ).elems
+    # TODO rest
 
 
 class Term:
@@ -310,8 +333,8 @@ class Term:
 
   def Type(self):
     typ = self.typ
-    # if isinstance(typ, TypeExpression):
-    #   typ = typ.typ
+    if isinstance(typ, TypeExpression):
+      typ = typ.typ
     return typ
 
 
@@ -336,3 +359,139 @@ class Var(Term):
     if not isinstance(other, Var):
       return False
     return self.name == other.name and self.typ == other.typ
+
+
+class Occurrence(Term):
+  def __init__(self, u: Var):
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = TypeExpression(u.typ)
+
+  def __str__(self):
+    return str(self.var)
+
+  def __eq__(self, other):
+    if isinstance(other, Occurrence):
+      return self.var == other.var
+    if isinstance(other, Var):
+      return self.var == other
+    return False
+
+
+class FreeVar(Occurrence):
+  def Copy(self) -> 'FreeVar':
+    return FreeVar(Var(self.var.name, self.typ))
+
+
+class BindingVar(Occurrence):
+  def __init__(self, u: Var):
+    if isinstance(u, BindingVar):
+      self.var = u.var
+      self.typ = u.typ
+      return
+    assert isinstance(u, Var)
+    self.var = u
+    self.typ = TypeExpression(u.typ)
+
+  def __eq__(self, other):
+    return id(self) == id(other)
+
+  def __hash__(self):
+    return id(self)
+
+  def ShouldBind(self, fv: FreeVar) -> bool:
+    return self.var == fv.var
+
+
+class BoundVar(Occurrence):
+  def __init__(self, bv: BindingVar, fv: FreeVar):
+    self.bv = bv
+    self.var = fv.var
+    bv_typ = self.bv.typ
+    if TypeExpression(bv_typ) != TypeExpression(self.var.typ):
+      raise TypeError(
+          f'Cannot bind variable with type {bv_typ} '
+          f'to variable with type {self.var.typ}'
+      )
+    self.typ = TypeExpression(fv.typ)
+
+  def __str__(self):
+    return self.var.name
+
+  def BoundTo(self, bv: BindingVar) -> bool:
+    return self.bv == bv
+
+
+class Expression(Term):
+  def __init__(self, term: Term):
+    match term:
+      case Expression():
+        self.term = term.Copy().term
+      case Var():
+        self.term = FreeVar(term)
+      case FreeVar() | BoundVar():
+        self.term = term
+      # TODO rest
+      case _:
+        raise NotImplementedError(f'Unexpected input to Expression {term}')
+    self.typ = TypeExpression(self.term.typ)
+
+  def Copy(self):
+     match self.term:
+      case FreeVar() | BoundVar():
+        return Expression(self.term.var)
+      # TODO rest
+      case _:
+        raise NotImplementedError(
+            f'Unexpected member of Expression {self.term}'
+        )
+
+  def MaybeBindFreeTypesTo(self, btv: BindingTypeVar):
+    self.typ.MaybeBindFreeTypesTo(btv)
+    match self.term:
+      case FreeVar() | BoundVar():
+        self.term.typ.MaybeBindFreeTypesTo(btv)
+      # TODO rest
+
+  def MaybeBindFreeVarsTo(self, bv: BindingVar):
+    self.typ.MaybeBindFreeVarsTo(bv)
+    match self.term:
+      case FreeVar():
+        if bv.ShouldBind(self.term):
+          self.term = BoundVar(bv, self.term)
+      case BoundVar():
+        pass
+      # TODO rest
+
+
+class FreeVars(Multiset[Var]):
+  def __init__(self, M: Union[KindExpression, TypeExpression, Expression]):
+    self.elems = []
+    match M:
+      case KindExpression():
+        self._FindKindFreeVars(M)
+      case TypeExpression():
+        self._FindTypeFreeVars(M)
+      case Expression():
+        self._FindTermFreeVars(M)
+      case _:
+        raise NotImplementedError(f'Unexpected input to FreeTypeVars {M}')
+  
+  def _FindKindFreeVars(self, K: KindExpression):
+    if isinstance(K.kind, PiKind):
+      if isinstance(K.kind.arg, Type):
+        self.elems += FreeVars(K.kind.arg.kind).elems
+      else:
+        self.elems += FreeVars(K.kind.arg.typ).elems
+      self.elems += FreeVars(K.kind.body).elems
+
+  def _FindTypeFreeVars(self, T: TypeExpression):
+    self.elems += FreeVars(T.kind).elems
+    # TODO rest
+
+  def _FindTermFreeTypeVars(self, M: Expression):
+    self.elems += FreeVars(M.typ).elems
+    match M.term:
+      case FreeVar():
+        self.elems.append(M.term.var)
+      # TODO rest

@@ -11,11 +11,17 @@ def RunExamples():
   print(AllKinds())
   print(Star())
   A = TypeVar('A', Star())
+  B = TypeVar('B', PiKind(A, Star()))
   print(A)
+  print(TypeExpression(B))
+  print(KindExpression(PiKind(B, Star())))
+
   a = Var('a', A)
+  b = Var('b', B)
   print(a)
-  print(KindExpression(PiKind(A, Star())))
-  print(PiKind(a, Star()))
+  print(b)
+  print(KindExpression(PiKind(a, Star())))
+  print(KindExpression(PiKind(b, Star())))
 
 
 if __name__ == '__main__':
