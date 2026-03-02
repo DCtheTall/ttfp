@@ -14,6 +14,8 @@ def RunExamples():
   print(A)
   a = Var('a', A)
   print(a)
+  print(KindExpression(PiKind(A, Star())))
+  print(PiKind(a, Star()))
 
 
 if __name__ == '__main__':
