@@ -39,6 +39,14 @@ def RunExamples():
   print(TypeExpression(TAbstract(a, A)))
   print(TypeExpression(TAbstract(a, B)))
 
+  print(TypeExpression(TApply(B, A)))
+  print(TypeExpression(TAbstract(A, TAbstract(B, TApply(B, A)))))
+
+  P = TypeVar('P', PiKind(a, Star()))
+  print(P)
+  print(TypeExpression(TApply(P, a)))
+  print(TypeExpression(TAbstract(a, TAbstract(P, TApply(P, a)))))
+
 
 if __name__ == '__main__':
   RunExamples()

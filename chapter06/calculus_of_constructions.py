@@ -107,6 +107,14 @@ class KindExpression(Kind):
   def __str__(self):
     return str(self.kind)
 
+  def __eq__(self, other):
+    # TODO alpha-equivalence
+    if isinstance(other, KindExpression):
+      return self.kind == other.kind
+    if not isinstance(other, Kind):
+      return False
+    return self.kind == other
+
   def Copy(self) -> 'KindExpression':
     match self.kind:
       case Star():
@@ -159,6 +167,8 @@ class TypeVar(Type):
 
   def __eq__(self, other):
     if isinstance(other, TypeExpression):
+      other = other.typ
+    if isinstance(other, TOccurrence):
       other = other.typ
     if not isinstance(other, TypeVar):
       return False
@@ -344,6 +354,54 @@ class TAbstract(Type):
     return self.body
 
 
+class TApply(Type):
+  def __init__(self, fn: Type, arg: Union[Type, Term]):
+    if not isinstance(fn.Kind(), PiKind):
+      raise TypeError(f'Unexpected input to TApply {fn}')
+    if (
+        (
+            isinstance(fn.Kind().arg, Type)
+            and (not isinstance(arg, Type) or arg.kind != fn.Kind().arg.kind)
+        ) or (
+            isinstance(fn.Kind().arg, Term)
+            and (not isinstance(arg, Term) or arg.typ != fn.Kind().arg.typ)
+        )
+    ):
+      raise TypeError(f'Mismatched inputs to TApply {fn} and {arg}')
+    self.fn = fn
+    self.arg = arg
+    self.kind = fn.Kind().body
+    # TODO substitution
+    # if isinstance(self.fn, TypeExpression):
+    #   pass
+  
+  def __eq__(self, other):
+    if isinstance(other, TypeExpression):
+      return self == other.typ
+    if not isinstance(other, TApply):
+      return False
+    return (self.fn, self.arg) == (other.fn, other.arg)
+
+  def __str__(self):
+    fn = self.FnType()
+    fn_str = str(fn)
+    if isinstance(fn, TApply):
+      fn_str = fn_str[1:-1]
+    if isinstance(self.arg, Type):
+      arg = str(self.arg)
+      arg_kind = str(self.arg.kind)
+      if arg.endswith(arg_kind):
+        arg = arg[:-(len(arg_kind) + 1)]
+    else:
+      arg = str(self.arg)
+    return f'({fn_str} {arg}):{self.kind}'[:-2]
+
+  def FnType(self):
+    if isinstance(self.fn, TypeExpression):
+      return self.fn.typ
+    return self.fn
+
+
 class TypeExpression(Type):
   typ: Type
   kind: Kind
@@ -356,13 +414,25 @@ class TypeExpression(Type):
         self.typ = FreeTypeVar(typ)
       case PiType() | TAbstract():
         self.typ = type(typ)(typ.arg, TypeExpression(typ.body))
-      # TODO rest
+      case TApply():
+        if isinstance(typ.arg, Type):
+          self.typ = TApply(TypeExpression(typ.fn), TypeExpression(typ.arg))
+        else:
+          self.typ = TApply(TypeExpression(typ.fn), Expression(typ.arg))
       case _:
         raise NotImplementedError(f'Unexpected input to TypeExpression {typ}')
     self.kind = KindExpression(self.typ.kind)
 
   def __str__(self):
     return str(self.typ)
+
+  def __eq__(self, other):
+    # TODO alpha-equivalence
+    if isinstance(other, TypeExpression):
+      other = other.typ
+    if not isinstance(other, Type):
+      return False
+    return self.typ == other
 
   def Type(self) -> Type:
     typ = self.typ
@@ -378,7 +448,8 @@ class TypeExpression(Type):
         return TypeExpression(
             type(self.typ)(self.typ.arg, self.typ.body.Copy())
         )
-      # TODO rest
+      case TApply():
+        return TApply(self.typ.fn.Copy(), self.typ.arg.Copy())
       case _:
         raise NotImplementedError(
             f'Unexpected member of TypeExpression {self.typ}'
@@ -398,7 +469,9 @@ class TypeExpression(Type):
         else:
           self.typ.arg.typ.MaybeBindFreeTypesTo(btv)
         self.typ.body.MaybeBindFreeTypesTo(btv)
-      # TODO rest
+      case TApply():
+        self.typ.fn.MaybeBindFreeTypesTo(btv)
+        self.typ.arg.MaybeBindFreeTypesTo(btv)
 
   def MaybeBindFreeVarsTo(self, bv: BindingVar):
     self.kind.MaybeBindFreeVarsTo(bv)
@@ -409,7 +482,9 @@ class TypeExpression(Type):
         else:
           self.typ.arg.typ.MaybeBindFreeVarsTo(bv)
         self.typ.body.MaybeBindFreeVarsTo(bv)
-      # TODO rest
+      case TApply():
+        self.typ.fn.MaybeBindFreeVarsTo(bv)
+        self.typ.arg.MaybeBindFreeVarsTo(bv)
 
 
 class Term:
@@ -523,6 +598,9 @@ class Expression(Term):
         raise NotImplementedError(f'Unexpected input to Expression {term}')
     self.typ = TypeExpression(self.term.typ)
 
+  def __str__(self):
+    return str(self.term)
+
   def Copy(self):
      match self.term:
       case FreeVar() | BoundVar():
@@ -608,7 +686,9 @@ class FreeTypeVars(Multiset[TypeVar]):
         else:
           self.elems += FreeTypeVars(T.typ.arg.typ).elems
         self.elems += FreeTypeVars(T.typ.body).elems
-      # TODO rest
+      case TApply():
+        self.elems += FreeTypeVars(T.typ.fn).elems
+        self.elems += FreeTypeVars(T.typ.arg).elems
 
   def _FindTermFreeTypeVars(self, M: Expression):
     self.elems += FreeTypeVars(M.typ).elems
@@ -645,7 +725,9 @@ class FreeVars(Multiset[Var]):
         else:
           self.elems += FreeVars(T.typ.arg.typ)
         self.elems += FreeVars(T.typ.body).elems
-    # TODO rest
+      case TApply():
+        self.elems += FreeVars(T.typ.fn).elems
+        self.elems += FreeVars(T.typ.arg).elems
 
   def _FindTermFreeTypeVars(self, M: Expression):
     self.elems += FreeVars(M.typ).elems
