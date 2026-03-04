@@ -584,6 +584,73 @@ class BoundVar(Occurrence):
     return self.bv == bv
 
 
+class Apply(Term):
+  def __init__(self, fn: Term, arg: Union[Type, Term]):
+    if not isinstance(fn.Type(), PiType):
+      raise TypeError(f'Unexpected input to TApply {fn}')
+    if (
+        (
+            isinstance(fn.Type().arg, Type)
+            and (not isinstance(arg, Type) or arg.kind != fn.Type().arg.kind)
+        ) or (
+            isinstance(fn.Type().arg, Term)
+            and (not isinstance(arg, Term) or arg.typ != fn.Type().arg.typ)
+        )
+    ):
+      raise TypeError(f'Mismatched inputs to TApply {fn} and {arg}')
+    self.fn = fn
+    self.arg = arg
+    self.typ = fn.Type().body
+    # TODO substitution
+    # if isinstance(self.fn, TypeExpression):
+    #   pass
+
+  def __eq__(self, other):
+    if isinstance(other, Expression):
+      return self == other.term
+    if not isinstance(other, Apply):
+      return False
+    return (self.fn, self.arg) == (other.fn, other.arg)
+
+  def __str__(self):
+    fn = self.fn
+    if isinstance(fn, Expression):
+      fn = fn.term
+    fn_str = str(self.fn)
+    if isinstance(fn, Apply):
+      fn_str = '):'.join(fn_str.split('):')[:-1])[1:]
+    if isinstance(self.arg, Type):
+      arg = str(self.arg)
+      k_arg = str(self.arg.kind)[:-2]
+      if arg.endswith(k_arg):
+        arg = arg[:-len(k_arg)-1]
+    else:
+      arg = str(self.arg)
+    typ = str(self.typ)
+    k_typ = str(self.typ.kind)[:-2]
+    if typ.endswith(k_typ):
+      typ = typ[:-len(k_typ)-1]
+    return f'({fn_str} {arg}):{typ}'
+
+  def Fn(self) -> Union[Var, Apply, Abstract]:
+    fn = self.fn
+    if isinstance(fn, Expression):
+      fn = fn.term
+    if isinstance(fn, Occurrence):
+      fn = fn.var
+    return fn
+
+  def Arg(self) -> Union[Type, Term]:
+    arg = self.arg
+    if isinstance(arg, TypeExpression):
+      arg = arg.typ
+    if isinstance(arg, Expression):
+      arg = arg.term
+    if isinstance(arg, Occurrence):
+      arg = arg.var
+    return arg
+
+
 class Expression(Term):
   def __init__(self, term: Term):
     match term:
@@ -593,6 +660,12 @@ class Expression(Term):
         self.term = FreeVar(term)
       case FreeVar() | BoundVar():
         self.term = term
+      case Apply():
+        if isinstance(term.arg, Type):
+          arg = TypeExpression(term.arg)
+        else:
+          arg = Expression(term.arg)
+        self.term = Apply(Expression(term.fn), arg)
       # TODO rest
       case _:
         raise NotImplementedError(f'Unexpected input to Expression {term}')
@@ -605,6 +678,12 @@ class Expression(Term):
      match self.term:
       case FreeVar() | BoundVar():
         return Expression(self.term.var)
+      case Apply():
+        if isinstance(self.term.arg, Type):
+          arg = TypeExpression(self.term.arg)
+        else:
+          arg = Expression(self.term.arg)
+        self.term = Apply(Expression(self.term.fn), arg)
       # TODO rest
       case _:
         raise NotImplementedError(
@@ -616,6 +695,9 @@ class Expression(Term):
     match self.term:
       case FreeVar() | BoundVar():
         self.term.typ.MaybeBindFreeTypesTo(btv)
+      case Apply():
+        self.term.fn.MaybeBindFreeTypesTo(btv)
+        self.term.arg.MaybeBindFreeTypesTo(btv)
       # TODO rest
 
   def MaybeBindFreeVarsTo(self, bv: BindingVar):
@@ -626,6 +708,9 @@ class Expression(Term):
           self.term = BoundVar(bv, self.term)
       case BoundVar():
         pass
+      case Apply():
+        self.term.fn.MaybeBindFreeVarsTo(bv)
+        self.term.arg.MaybeBindFreeVarsTo(bv)
       # TODO rest
 
 
@@ -692,6 +777,10 @@ class FreeTypeVars(Multiset[TypeVar]):
 
   def _FindTermFreeTypeVars(self, M: Expression):
     self.elems += FreeTypeVars(M.typ).elems
+    match M.term:
+      case Apply():
+        self.elems += FreeTypeVars(M.term.fn).elems
+        self.elems += FreeTypeVar(M.term.arg).elems
     # TODO rest
 
 
@@ -729,9 +818,12 @@ class FreeVars(Multiset[Var]):
         self.elems += FreeVars(T.typ.fn).elems
         self.elems += FreeVars(T.typ.arg).elems
 
-  def _FindTermFreeTypeVars(self, M: Expression):
+  def _FindTermFreeVars(self, M: Expression):
     self.elems += FreeVars(M.typ).elems
     match M.term:
       case FreeVar():
         self.elems.append(M.term.var)
+      case Apply():
+        self.elems += FreeVars(M.term.fn).elems
+        self.elems += FreeVars(M.term.arg).elems
       # TODO rest

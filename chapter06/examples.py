@@ -47,6 +47,15 @@ def RunExamples():
   print(TypeExpression(TApply(P, a)))
   print(TypeExpression(TAbstract(a, TAbstract(P, TApply(P, a)))))
 
+  F = Var('F', TypeExpression(PiType(A, PiType(a, A))))
+  print(Expression(F))
+  print(Expression(Apply(F, A)))
+  # TODO substitute type
+  # print(Expression(Apply(F, C)))
+  f = Var('f', TypeExpression(PiType(a, A)))
+  print(Expression(f))
+  print(Expression(Apply(f, a)))
+
 
 if __name__ == '__main__':
   RunExamples()
