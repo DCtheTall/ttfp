@@ -651,6 +651,49 @@ class Apply(Term):
     return arg
 
 
+class Abstract(Term):
+  def __init__(
+      self, arg: Union[TypeVar, BindingTypeVar, Var, BindingVar], body: Term
+  ):
+    match arg:
+      case BindingTypeVar() | BindingVar():
+        pass
+      case Var():
+        arg = BindingVar(arg)
+      case TypeVar():
+        arg = BindingTypeVar(arg)
+      case _:
+        raise NotImplementedError(f'Unexpected argument to PiKind {arg}')
+    self.arg = arg
+    self.body = body
+    if isinstance(body, Expression):
+      if isinstance(self.arg, Type):
+        self.body.MaybeBindFreeTypesTo(self.arg)
+      else:
+        self.body.MaybeBindFreeVarsTo(self.arg)
+    self.typ = PiType(self.arg, self.body.typ)
+
+  def __str__(self):
+    body = self.BodyTerm()
+    args = str(self.arg)
+    while isinstance(body, Abstract):
+      args = body._AppendMultiArgStr(args, body)
+      body = body.BodyTerm()
+    typ = str(self.typ)
+    kind = str(self.typ.kind)[:-2]
+    if typ.endswith(kind):
+      typ = typ[:-len(kind)-1]
+    return f'(λ{args}.{body}):{typ}'
+
+  def BodyTerm(self) -> Term:
+    if isinstance(self.body, Expression):
+      return self.body.term
+    return self.body
+
+  def _AppendMultiArgStr(self, args_str, body) -> str:
+    return args_str + f'.λ{body.arg}'
+
+
 class Expression(Term):
   def __init__(self, term: Term):
     match term:
@@ -666,7 +709,8 @@ class Expression(Term):
         else:
           arg = Expression(term.arg)
         self.term = Apply(Expression(term.fn), arg)
-      # TODO rest
+      case Abstract():
+        self.term = Abstract(term.arg, Expression(term.body))
       case _:
         raise NotImplementedError(f'Unexpected input to Expression {term}')
     self.typ = TypeExpression(self.term.typ)
@@ -684,7 +728,8 @@ class Expression(Term):
         else:
           arg = Expression(self.term.arg)
         self.term = Apply(Expression(self.term.fn), arg)
-      # TODO rest
+      case Abstract():
+        self.term = Abstract(self.term.arg, self.term.body.Copy())
       case _:
         raise NotImplementedError(
             f'Unexpected member of Expression {self.term}'
@@ -698,7 +743,12 @@ class Expression(Term):
       case Apply():
         self.term.fn.MaybeBindFreeTypesTo(btv)
         self.term.arg.MaybeBindFreeTypesTo(btv)
-      # TODO rest
+      case Abstract():
+        if isinstance(self.term.arg, Type):
+          self.term.arg.kind.MaybeBindFreeTypesTo(btv)
+        else:
+          self.term.arg.typ.MaybeBindFreeTypesTo(btv)
+        self.term.body.MaybeBindFreeTypesTo(btv)
 
   def MaybeBindFreeVarsTo(self, bv: BindingVar):
     self.typ.MaybeBindFreeVarsTo(bv)
@@ -711,7 +761,12 @@ class Expression(Term):
       case Apply():
         self.term.fn.MaybeBindFreeVarsTo(bv)
         self.term.arg.MaybeBindFreeVarsTo(bv)
-      # TODO rest
+      case Abstract():
+        if isinstance(self.term.arg, Type):
+          self.term.arg.kind.MaybeBindFreeVarsTo(bv)
+        else:
+          self.term.arg.typ.MaybeBindFreeVarsTo(bv)
+        self.term.body.MaybeBindFreeVarsTo(bv)
 
 
 class Multiset[T]:
@@ -781,7 +836,12 @@ class FreeTypeVars(Multiset[TypeVar]):
       case Apply():
         self.elems += FreeTypeVars(M.term.fn).elems
         self.elems += FreeTypeVar(M.term.arg).elems
-    # TODO rest
+      case Abstract():
+        if isinstance(M.term.arg, Type):
+          self.elems += FreeTypeVars(M.term.arg.kind).elems
+        else:
+          self.elems += FreeTypeVars(M.term.arg.typ).elems
+        self.elems += FreeTypeVars(M.term.body).elems
 
 
 class FreeVars(Multiset[Var]):
@@ -810,9 +870,9 @@ class FreeVars(Multiset[Var]):
     match T.typ:
       case PiType() | TAbstract():
         if isinstance(T.typ.arg, Type):
-          self.elems += FreeVars(T.typ.arg.kind)
+          self.elems += FreeVars(T.typ.arg.kind).elems
         else:
-          self.elems += FreeVars(T.typ.arg.typ)
+          self.elems += FreeVars(T.typ.arg.typ).elems
         self.elems += FreeVars(T.typ.body).elems
       case TApply():
         self.elems += FreeVars(T.typ.fn).elems
@@ -826,4 +886,9 @@ class FreeVars(Multiset[Var]):
       case Apply():
         self.elems += FreeVars(M.term.fn).elems
         self.elems += FreeVars(M.term.arg).elems
-      # TODO rest
+      case Abstract():
+        if isinstance(M.term.arg, Type):
+          self.elems += FreeVars(M.term.arg.kind).elems
+        else:
+          self.elems += FreeVars(M.term.arg.typ).elems
+        self.elems += FreeVars(M.term.body).elems
