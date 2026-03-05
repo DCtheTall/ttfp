@@ -807,7 +807,7 @@ class FreeVars(Multiset[Var]):
     self.elems += FreeVars(M.typ).elems
 
 
-class DeBrujinIndices(dict[Union[Var], int]):
+class DeBrujinIndices(dict[Var, int]):
   def __str__(self):
     return str({str(k): str(v) for k, v in self.items()})
 
