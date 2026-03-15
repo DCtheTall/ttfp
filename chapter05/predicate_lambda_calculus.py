@@ -835,6 +835,8 @@ def KAlphaEquiv(
         new_de_brujin = de_brujin.copy()
         new_de_brujin[xu.var] = new_de_brujin[yu.var] = len(de_brujin)
         return _Helper(x.kind.body, y.kind.body, new_de_brujin)
+      case _:
+        raise NotImplementedError(f'Unexpected input to KAlphaEquiv {x}')
   return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 
@@ -912,7 +914,7 @@ def AlphaEquiv(
   return _Helper(x, y, de_brujin or DeBrujinIndices())
 
 
-class RenameBindingVarError(Exception):
+class RenameFreeVarError(Exception):
   pass
 
 
@@ -920,47 +922,12 @@ def Rename(
     M: Union[KindExpression, TypeExpression, Expression],
     x: Union[BindingVar, Var],
     y: Var
-) -> Union[TypeExpression, Expression]:
-  def _HasBindingVar(M: Union[TypeExpression, Expression], x: Var) -> bool:
-    match M:
-      case KindExpression():
-        match M.kind:
-          case Star():
-            return False
-          case PiKind():
-            if M.kind.arg.var == x:
-              return True
-            return _HasBindingVar(M.kind.body, x)
-      case TypeExpression():
-        match M.typ:
-          case TypeVar():
-            return False
-          case PiType() | TAbstract():
-            if M.typ.arg.var == x:
-              return True
-            return _HasBindingVar(M.typ.body, x)
-          case TApply():
-            return _HasBindingVar(M.typ.fn, x) or _HasBindingVar(M.typ.arg, x)
-      case Expression():
-        match M.term:
-          case Occurrence():
-            return False
-          case Abstract():
-            if M.term.arg.var == x:
-              return True
-            return _HasBindingVar(M.term.body, x)
-          case Apply():
-            return (
-                _HasBindingVar(M.term.fn, x) or _HasBindingVar(M.term.arg, x)
-            )
-      case _:
-        raise NotImplementedError(f'Unexpected input to HasBindingVar {M}')
-  
+) -> Union[KindExpression, TypeExpression, Expression]:
   def _RenameBoundVar(
       M: Union[KindExpression, TypeExpression, Expression],
       x: BindingVar,
       y: BindingVar
-  ) -> Union[TypeExpression, Expression]:
+  ) -> Union[KindExpression, TypeExpression, Expression]:
     match M:
       case KindExpression():
         match M.kind:
@@ -1077,10 +1044,10 @@ def Rename(
 def Substitute(
     M: Union[KindExpression, TypeExpression, Expression],
     x: Union[BindingVar, Var],
-    N: Expression,
+    N: Union[KindExpression, TypeExpression, Expression],
     new_vars: list[Var] = [],
     binding:  Optional[BindingVar] = None,
-) -> Union[TypeExpression, Expression]:
+) -> Union[KindExpression, TypeExpression, Expression]:
   match M:
     case KindExpression():
       match M.kind:
@@ -1104,7 +1071,7 @@ def Substitute(
           )
           return KindExpression(
               PiKind(
-                  M.kind.arg, Substitute(M.kind.body, x, N, new_vars, binding)
+                  arg, Substitute(M.kind.body, x, N, new_vars, binding)
               )
           )
     case TypeExpression():
@@ -1331,21 +1298,6 @@ class VarDeclaration:
 
   def __str__(self):
     return str(self.subj)
-
-
-class Domain(Multiset[Union[Var, TypeVar]]):
-    def __init__(self, types: list[TypeVar], vars: list[Var]):
-      self.vars = Multiset(vars)
-      self.types = Multiset(types)
-      self.elems = self.types.elems + self.vars.elems
-
-    def ContainsTypeVar(self, u: TypeVar) -> bool:
-      assert isinstance(u, TypeVar)
-      return self.types.Contains(u)
-
-    def ContainsVar(self, u: Var) -> bool:
-      assert isinstance(u, Var)
-      return self.vars.Contains(u)
 
 
 class Domain(Multiset[Union[Var, TypeVar]]):

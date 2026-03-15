@@ -86,8 +86,7 @@ def RunExamples():
   my = Expression(Abstract(C, Abstract(v, Abstract(c, Apply(v, c)))))
   print(f'{mx}\n    α= {my}:', mx == my)
 
-  # TODO substitute type
-  # print(Expression(Apply(f, C)))
+  print(Expression(Apply(f, C)))
 
 
 if __name__ == '__main__':
